@@ -174,5 +174,6 @@ A synthetic library can be generated with `scripts/gen-bench-library.py`.
 | M4 ✅ | **Timeline, File View, Search** | Timeline with scrubber, File View tree + filter, global search |
 | M5 ✅ | **Favorites, Trash, Storage** | Per-user favorites, trash with restore/purge, storage display |
 | M6 ✅ | **Sharing** | Share links for files/folders, public share pages, Sharing management view |
-| M7 | **Map & Explore** | Offline reverse geocoding, map with clustering, Explore facets |
+| M7 ✅ | **Map & Explore** | Offline reverse geocoding, map with clustering, Explore facets |
+| M7+ ✅ | **Installable app (PWA)** | Manifest, icons (incl. maskable / Apple), service worker caching the app shell (never photos or API data) |
 | M8 | **Slideshow & polish** | Slideshow, mobile/desktop polish, 100k-file benchmark pass, docs (README, docker-compose example) |

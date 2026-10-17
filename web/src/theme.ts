@@ -8,6 +8,10 @@ export function currentTheme(): Theme {
 
 export function setTheme(theme: Theme): void {
   document.documentElement.dataset.theme = theme;
+  // Match the installed app's title bar to the theme.
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute('content', theme === 'light' ? '#f7f8f9' : '#0f1113');
   try {
     localStorage.setItem(STORAGE_KEY, theme);
   } catch {

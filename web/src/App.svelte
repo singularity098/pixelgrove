@@ -1,9 +1,10 @@
 <script lang="ts">
   import Shell from './components/Shell.svelte';
   import Account from './pages/Account.svelte';
-  import ComingSoon from './pages/ComingSoon.svelte';
   import Folder from './pages/Folder.svelte';
   import Login from './pages/Login.svelte';
+  import Explore from './pages/Explore.svelte';
+  import ExploreItems from './pages/ExploreItems.svelte';
   import Favorites from './pages/Favorites.svelte';
   import Files from './pages/Files.svelte';
   import Trash from './pages/Trash.svelte';
@@ -21,10 +22,6 @@
   const shareToken = /^\/s\/([0-9a-f]{32})$/.exec(location.pathname)?.[1] ?? null;
   if (!shareToken) loadSession();
 
-  const upcoming: Record<string, [string, string]> = {
-    '/map': ['Map', 'M7'],
-    '/explore': ['Explore', 'M7'],
-  };
 
   const folderId = $derived(Number(/^\/folder\/(\d+)$/.exec(route.path)?.[1]) || null);
   const filesMatch = $derived(/^\/files(?:\/(\d+))?$/.exec(route.path));
@@ -64,8 +61,17 @@
       <Users me={user} />
     {:else if route.path === '/account'}
       <Account {user} />
-    {:else if upcoming[route.path]}
-      <ComingSoon title={upcoming[route.path][0]} milestone={upcoming[route.path][1]} />
+    {:else if route.path === '/explore'}
+      <Explore />
+    {:else if route.path === '/explore/items'}
+      {#key route.query.toString()}
+        <ExploreItems query={route.query} />
+      {/key}
+    {:else if route.path === '/map'}
+      <!-- Leaflet is loaded only when the map is opened. -->
+      {#await import('./pages/Map.svelte') then { default: Map }}
+        <Map />
+      {/await}
     {:else}
       <Photos />
     {/if}

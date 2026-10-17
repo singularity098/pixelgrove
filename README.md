@@ -2,7 +2,7 @@
 
 An ultra-light, fast, self-hosted photo and video library written in Rust.
 
-> **Status:** early development (milestone M6 — sharing). See
+> **Status:** early development (milestone M7 — map, explore and installable app). See
 > [docs/requirements.md](docs/requirements.md) and [docs/plan.md](docs/plan.md).
 
 ## Running with Docker
@@ -44,6 +44,25 @@ account. Links can expire, need a password, and allow or block downloads (with
 downloads off, photos are shown as previews only and videos still play). Folder links
 show items added later. Manage links under **Sharing**; admins see everyone's. Set
 `PIXELGROVE_PUBLIC_URL` so links use your public address.
+
+## Map and Explore
+
+**Map** plots photos that have a GPS location on OpenStreetMap, clustered with a
+thumbnail and count; click a cluster to see its photos. Map tiles come from
+`tile.openstreetmap.org`, so the browser needs internet access for them (nothing else
+about your library is sent anywhere).
+
+**Explore** groups the library by place, country, camera, year and type. Places are
+worked out offline at scan time from a bundled table of GeoNames cities (see
+[data/README.md](data/README.md)); they're also searchable, e.g. "kyoto" or "france".
+
+## Installing as an app
+
+PixelGrove is a Progressive Web App: in Chrome or Edge use **Install** in the address
+bar, on Android **Add to Home screen**, and on iPhone/iPad **Share → Add to Home
+Screen**. It then opens in its own window with its own icon. Browsers only allow this
+over HTTPS (or on `localhost`), so put PixelGrove behind a reverse proxy with a
+certificate to install it from other devices.
 
 ## Configuration
 
@@ -91,4 +110,4 @@ UI in the single `pixelgrove` binary.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Place data © GeoNames (CC BY 4.0); map data © OpenStreetMap contributors.

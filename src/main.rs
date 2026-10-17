@@ -6,6 +6,7 @@ mod config;
 mod db;
 mod indexer;
 mod metadata;
+mod places;
 mod preview;
 mod scanner;
 mod server;
@@ -70,6 +71,11 @@ async fn serve() -> Result<()> {
 
     let db = Db::open(&config.config_dir.join(db::DB_FILE_NAME))?;
     bootstrap_admin(&db, &config)?;
+    match scanner::backfill_places(&db) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(items = n, "added place names to existing photos"),
+        Err(err) => tracing::warn!("adding place names failed: {err:#}"),
+    }
     let indexer = Indexer::new(db.clone(), &config)?;
     indexer.start();
     spawn_session_cleanup(db.clone());

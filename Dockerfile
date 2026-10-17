@@ -18,6 +18,7 @@ RUN xx-apk add --no-cache musl-dev gcc
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
+COPY data/ data/
 COPY --from=web /src/web/dist web/dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target,id=target-$TARGETPLATFORM \

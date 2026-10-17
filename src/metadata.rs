@@ -209,6 +209,28 @@ mod tests {
     }
 
     #[test]
+    fn jpeg_gps() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kyoto.jpg");
+        std::fs::write(
+            &path,
+            crate::testdata::jpeg_at_location("2022:04:05 10:00:00", 34.9949, 135.785),
+        )
+        .unwrap();
+        let info = read(&mut MediaParser::new(), &path, MediaKind::Image);
+        assert!((info.latitude.unwrap() - 34.9949).abs() < 0.001, "{info:?}");
+        assert!((info.longitude.unwrap() - 135.785).abs() < 0.001);
+        let south_west = dir.path().join("rio.jpg");
+        std::fs::write(
+            &south_west,
+            crate::testdata::jpeg_at_location("2022:04:05 10:00:00", -22.9, -43.2),
+        )
+        .unwrap();
+        let info = read(&mut MediaParser::new(), &south_west, MediaKind::Image);
+        assert!(info.latitude.unwrap() < 0.0 && info.longitude.unwrap() < 0.0);
+    }
+
+    #[test]
     fn garbage_file_yields_empty_info() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("broken.jpg");

@@ -11,12 +11,17 @@ pub const PNG_3X2: &[u8] = &[
 
 /// A JPEG whose EXIF says Make "PixelCam", Model "Model 1", taken 2023-06-15 14:30:00.
 pub fn jpeg_with_exif() -> Vec<u8> {
-    jpeg_with(&exif_tiff("PixelCam", "Model 1", "2023:06:15 14:30:00"))
+    jpeg_with(&exif_tiff("2023:06:15 14:30:00", None))
 }
 
 /// A JPEG with the given capture time (`YYYY:MM:DD HH:MM:SS`).
 pub fn jpeg_taken_at(datetime: &str) -> Vec<u8> {
-    jpeg_with(&exif_tiff("PixelCam", "Model 1", datetime))
+    jpeg_with(&exif_tiff(datetime, None))
+}
+
+/// A JPEG with a capture time and GPS position (decimal degrees).
+pub fn jpeg_at_location(datetime: &str, lat: f64, lon: f64) -> Vec<u8> {
+    jpeg_with(&exif_tiff(datetime, Some((lat, lon))))
 }
 
 fn jpeg_with(tiff: &[u8]) -> Vec<u8> {
@@ -32,49 +37,128 @@ fn jpeg_with(tiff: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Builds a little-endian TIFF block with IFD0 (Make, Model, Exif pointer)
-/// and an Exif IFD (DateTimeOriginal).
-fn exif_tiff(make: &str, model: &str, datetime: &str) -> Vec<u8> {
-    const ASCII: u16 = 2;
-    const LONG: u16 = 4;
-    let ascii = |s: &str| {
-        let mut v = s.as_bytes().to_vec();
-        v.push(0);
-        v
-    };
-    let (make, model, datetime) = (ascii(make), ascii(model), ascii(datetime));
+const ASCII: u16 = 2;
+const LONG: u16 = 4;
+const RATIONAL: u16 = 5;
 
-    // Layout: header(8) | IFD0 (3 entries) | Exif IFD (1 entry) | data
-    let ifd_len = |n: usize| 2 + n * 12 + 4;
-    let ifd0_at = 8;
-    let exif_at = ifd0_at + ifd_len(3);
-    let mut data_at = exif_at + ifd_len(1);
+/// One IFD entry: tag, type, value count and the raw little-endian value bytes.
+struct Entry {
+    tag: u16,
+    typ: u16,
+    count: u32,
+    value: Vec<u8>,
+}
+
+fn ascii(tag: u16, s: &str) -> Entry {
+    let mut value = s.as_bytes().to_vec();
+    value.push(0);
+    Entry {
+        tag,
+        typ: ASCII,
+        count: value.len() as u32,
+        value,
+    }
+}
+
+fn long(tag: u16, v: u32) -> Entry {
+    Entry {
+        tag,
+        typ: LONG,
+        count: 1,
+        value: v.to_le_bytes().to_vec(),
+    }
+}
+
+/// Degrees as the EXIF degrees/minutes/seconds rationals.
+fn dms(tag: u16, degrees: f64) -> Entry {
+    let d = degrees.abs();
+    let deg = d.trunc();
+    let min = ((d - deg) * 60.0).trunc();
+    let sec = ((d - deg) * 60.0 - min) * 60.0;
+    let mut value = Vec::new();
+    for (num, den) in [
+        (deg as u32, 1u32),
+        (min as u32, 1),
+        ((sec * 1000.0).round() as u32, 1000),
+    ] {
+        value.extend_from_slice(&num.to_le_bytes());
+        value.extend_from_slice(&den.to_le_bytes());
+    }
+    Entry {
+        tag,
+        typ: RATIONAL,
+        count: 3,
+        value,
+    }
+}
+
+/// Lays out IFDs one after another, each followed by its out-of-line values.
+/// The IFD0 pointer entries (0x8769 Exif, 0x8825 GPS) are patched to the later IFDs.
+fn exif_tiff(datetime: &str, gps: Option<(f64, f64)>) -> Vec<u8> {
+    let mut ifds: Vec<Vec<Entry>> = vec![
+        vec![
+            ascii(0x010F, "PixelCam"),
+            ascii(0x0110, "Model 1"),
+            long(0x8769, 0), // Exif IFD pointer, patched below
+        ],
+        vec![ascii(0x9003, datetime)],
+    ];
+    if let Some((lat, lon)) = gps {
+        ifds[0].push(long(0x8825, 0)); // GPS IFD pointer, patched below
+        ifds.push(vec![
+            ascii(0x0001, if lat >= 0.0 { "N" } else { "S" }),
+            dms(0x0002, lat),
+            ascii(0x0003, if lon >= 0.0 { "E" } else { "W" }),
+            dms(0x0004, lon),
+        ]);
+    }
+    // Sizes: 2 + 12n + 4 for the IFD itself, plus out-of-line values (> 4 bytes).
+    let sizes: Vec<usize> = ifds
+        .iter()
+        .map(|ifd| {
+            2 + ifd.len() * 12
+                + 4
+                + ifd
+                    .iter()
+                    .filter(|e| e.value.len() > 4)
+                    .map(|e| e.value.len())
+                    .sum::<usize>()
+        })
+        .collect();
+    let mut offsets = vec![8usize];
+    for size in &sizes[..sizes.len() - 1] {
+        offsets.push(offsets.last().unwrap() + size);
+    }
+    for entry in &mut ifds[0] {
+        match entry.tag {
+            0x8769 => entry.value = (offsets[1] as u32).to_le_bytes().to_vec(),
+            0x8825 => entry.value = (offsets[2] as u32).to_le_bytes().to_vec(),
+            _ => {}
+        }
+    }
 
     let mut out = b"II*\0".to_vec();
-    out.extend_from_slice(&(ifd0_at as u32).to_le_bytes());
-    let mut data = Vec::new();
-    let mut entry = |out: &mut Vec<u8>, tag: u16, typ: u16, value: &[u8]| {
-        out.extend_from_slice(&tag.to_le_bytes());
-        out.extend_from_slice(&typ.to_le_bytes());
-        out.extend_from_slice(&(value.len() as u32).to_le_bytes());
-        out.extend_from_slice(&(data_at as u32).to_le_bytes());
-        data.extend_from_slice(value);
-        data_at += value.len();
-    };
-
-    out.extend_from_slice(&3u16.to_le_bytes());
-    entry(&mut out, 0x010F, ASCII, &make);
-    entry(&mut out, 0x0110, ASCII, &model);
-    out.extend_from_slice(&0x8769u16.to_le_bytes());
-    out.extend_from_slice(&LONG.to_le_bytes());
-    out.extend_from_slice(&1u32.to_le_bytes());
-    out.extend_from_slice(&(exif_at as u32).to_le_bytes());
-    out.extend_from_slice(&0u32.to_le_bytes()); // no next IFD
-
-    out.extend_from_slice(&1u16.to_le_bytes());
-    entry(&mut out, 0x9003, ASCII, &datetime);
-    out.extend_from_slice(&0u32.to_le_bytes());
-
-    out.extend_from_slice(&data);
+    out.extend_from_slice(&8u32.to_le_bytes());
+    for (ifd, &start) in ifds.iter().zip(&offsets) {
+        let mut data_at = start + 2 + ifd.len() * 12 + 4;
+        let mut data = Vec::new();
+        out.extend_from_slice(&(ifd.len() as u16).to_le_bytes());
+        for e in ifd {
+            out.extend_from_slice(&e.tag.to_le_bytes());
+            out.extend_from_slice(&e.typ.to_le_bytes());
+            out.extend_from_slice(&e.count.to_le_bytes());
+            if e.value.len() <= 4 {
+                let mut inline = e.value.clone();
+                inline.resize(4, 0);
+                out.extend_from_slice(&inline);
+            } else {
+                out.extend_from_slice(&(data_at as u32).to_le_bytes());
+                data.extend_from_slice(&e.value);
+                data_at += e.value.len();
+            }
+        }
+        out.extend_from_slice(&0u32.to_le_bytes()); // no next IFD
+        out.extend_from_slice(&data);
+    }
     out
 }

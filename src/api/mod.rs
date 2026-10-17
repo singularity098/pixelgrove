@@ -2,6 +2,7 @@
 
 mod auth;
 mod browse;
+mod explore;
 mod favorites;
 mod files;
 mod library;
@@ -47,6 +48,7 @@ pub fn router() -> Router<AppState> {
         .route("/folders/filter", get(search::filter_folders))
         .route("/folders/{id}", get(browse::folder))
         .route("/folders/{id}/media", get(browse::folder_media))
+        .route("/media/batch", get(explore::batch))
         .route("/media/{id}", get(media::detail))
         .route("/media/{id}/preview/{variant}", get(media::preview))
         .route("/media/{id}/file", get(media::file))
@@ -62,6 +64,9 @@ pub fn router() -> Router<AppState> {
         .route("/trash/{id}/preview/{variant}", get(trash::preview))
         .route("/trash/{id}/file", get(trash::file))
         .route("/storage", get(library::storage))
+        .route("/explore", get(explore::explore))
+        .route("/explore/items", get(explore::items))
+        .route("/map/points", get(explore::map_points))
         .route("/shares", get(shares::list).post(shares::create))
         .route("/shares/{id}", patch(shares::update).delete(shares::delete))
         .route("/s/{token}", get(public::open))

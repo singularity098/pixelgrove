@@ -159,6 +159,13 @@ CREATE TABLE shares (
 CREATE INDEX shares_media ON shares(media_id);
 CREATE INDEX shares_creator ON shares(created_by);
 "#,
+    r#"
+-- Nearest city and its country, from GPS (see places.rs). Filled at scan time; rows
+-- indexed earlier are filled in at startup.
+ALTER TABLE media ADD COLUMN place TEXT;
+ALTER TABLE media ADD COLUMN country TEXT;
+CREATE INDEX media_country ON media(country, place) WHERE country IS NOT NULL;
+"#,
 ];
 
 #[derive(Clone)]

@@ -421,9 +421,9 @@ fn upsert_media(
         let mut upsert = tx.prepare(
             "INSERT INTO media (folder_id, name, kind, size, mtime, taken_at, tz_offset, width,
                  height, orientation, duration_ms, camera_make, camera_model, lens, latitude,
-                 longitude, description, search_text)
+                 longitude, description, search_text, place, country)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18)
+                     ?18, ?19, ?20)
              ON CONFLICT (folder_id, name) DO UPDATE SET
                  kind = excluded.kind, size = excluded.size, mtime = excluded.mtime,
                  taken_at = excluded.taken_at, tz_offset = excluded.tz_offset,
@@ -432,7 +432,8 @@ fn upsert_media(
                  camera_make = excluded.camera_make, camera_model = excluded.camera_model,
                  lens = excluded.lens, latitude = excluded.latitude,
                  longitude = excluded.longitude, description = excluded.description,
-                 search_text = excluded.search_text",
+                 search_text = excluded.search_text, place = excluded.place,
+                 country = excluded.country",
         )?;
         for ((file, folder_id, known), info) in files.iter().zip(infos) {
             let taken_at = info.taken_at.unwrap_or(file.mtime);
@@ -440,7 +441,11 @@ fn upsert_media(
                 .strip_prefix(root)
                 .map(|p| p.to_string_lossy())
                 .unwrap_or_default();
-            let search = search_text(&file.name, &folder, info, taken_at);
+            let place = match (info.latitude, info.longitude) {
+                (Some(lat), Some(lon)) => crate::places::lookup(lat, lon),
+                _ => None,
+            };
+            let search = search_text(&file.name, &folder, info, taken_at, place.as_ref());
             upsert.execute(params![
                 folder_id,
                 file.name,
@@ -460,6 +465,8 @@ fn upsert_media(
                 info.longitude,
                 info.description,
                 search,
+                place.as_ref().map(|p| &p.city),
+                place.as_ref().map(|p| &p.country),
             ])?;
             touched.insert(*folder_id);
             if *known {
@@ -473,8 +480,14 @@ fn upsert_media(
 }
 
 /// The lower-cased text that search matches against: file name, folder path below the
-/// root, camera, lens, description and the capture date as `YYYY-MM-DD`.
-pub fn search_text(name: &str, folder: &str, info: &MediaInfo, taken_at: i64) -> String {
+/// root, camera, lens, description, the capture date as `YYYY-MM-DD`, and the place.
+pub fn search_text(
+    name: &str,
+    folder: &str,
+    info: &MediaInfo,
+    taken_at: i64,
+    place: Option<&crate::places::Place>,
+) -> String {
     let date = chrono::DateTime::from_timestamp(taken_at, 0)
         .map(|d| d.format("%Y-%m-%d").to_string())
         .unwrap_or_default();
@@ -486,6 +499,8 @@ pub fn search_text(name: &str, folder: &str, info: &MediaInfo, taken_at: i64) ->
         info.lens.as_deref().unwrap_or(""),
         info.description.as_deref().unwrap_or(""),
         &date,
+        place.map_or("", |p| p.city.as_str()),
+        place.map_or("", |p| p.country.as_str()),
     ]
     .join(" ")
     .to_lowercase()
@@ -519,6 +534,36 @@ fn path_str(path: &Path) -> Result<String> {
     path.to_str()
         .map(str::to_string)
         .with_context(|| format!("path is not valid UTF-8: {}", path.display()))
+}
+
+/// Fills in place names for media indexed before places existed (or whose coordinates
+/// had no nearby city then). Runs at startup; cheap when there's nothing to do.
+pub fn backfill_places(db: &Db) -> Result<usize> {
+    let mut conn = db.conn()?;
+    let pending: Vec<(i64, f64, f64)> = conn
+        .prepare(
+            "SELECT id, latitude, longitude FROM media
+             WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND country IS NULL",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let tx = conn.transaction()?;
+    let mut filled = 0;
+    {
+        let mut update = tx.prepare(
+            "UPDATE media SET place = ?1, country = ?2,
+                 search_text = search_text || ' ' || lower(?1 || ' ' || ?2)
+             WHERE id = ?3",
+        )?;
+        for (id, lat, lon) in pending {
+            if let Some(place) = crate::places::lookup(lat, lon) {
+                update.execute(params![place.city, place.country, id])?;
+                filled += 1;
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(filled)
 }
 
 #[cfg(test)]
