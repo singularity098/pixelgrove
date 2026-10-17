@@ -9,16 +9,19 @@
   import Trash from './pages/Trash.svelte';
   import Photos from './pages/Photos.svelte';
   import Search from './pages/Search.svelte';
+  import Shared from './pages/Shared.svelte';
+  import Sharing from './pages/Sharing.svelte';
   import Timeline from './pages/Timeline.svelte';
   import Setup from './pages/Setup.svelte';
   import Users from './pages/Users.svelte';
   import { route } from './lib/router.svelte';
   import { loadSession, session } from './lib/session.svelte';
 
-  loadSession();
+  // Share links are public: they don't need (or check) a session.
+  const shareToken = /^\/s\/([0-9a-f]{32})$/.exec(location.pathname)?.[1] ?? null;
+  if (!shareToken) loadSession();
 
   const upcoming: Record<string, [string, string]> = {
-    '/sharing': ['Sharing', 'M6'],
     '/map': ['Map', 'M7'],
     '/explore': ['Explore', 'M7'],
   };
@@ -28,7 +31,9 @@
   const searchQuery = $derived(route.path === '/search' ? (route.query.get('q') ?? '').trim() : '');
 </script>
 
-{#if session.current.status === 'setup'}
+{#if shareToken}
+  <Shared token={shareToken} />
+{:else if session.current.status === 'setup'}
   <Setup />
 {:else if session.current.status === 'signed-out'}
   <Login />
@@ -43,6 +48,8 @@
       {#key filesMatch[1]}
         <Files id={filesMatch[1] ? Number(filesMatch[1]) : null} />
       {/key}
+    {:else if route.path === '/sharing' && user.role !== 'viewer'}
+      <Sharing me={user} />
     {:else if route.path === '/favorites' && user.role !== 'viewer'}
       <Favorites />
     {:else if route.path === '/trash' && user.role !== 'viewer'}

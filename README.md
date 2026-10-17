@@ -2,7 +2,7 @@
 
 An ultra-light, fast, self-hosted photo and video library written in Rust.
 
-> **Status:** early development (milestone M5 — favorites, trash and storage). See
+> **Status:** early development (milestone M6 — sharing). See
 > [docs/requirements.md](docs/requirements.md) and [docs/plan.md](docs/plan.md).
 
 ## Running with Docker
@@ -35,6 +35,15 @@ media folder (same volume, so nothing is copied), mirroring where it came from. 
 be restored from **Trash** for 30 days, then it is deleted for good. Trash needs the
 media mounted read-write; on a read-only mount (`:ro`) PixelGrove says so and leaves the
 file alone. Favorites are per user and stored only in PixelGrove's database.
+
+## Sharing
+
+Editors and admins can share a photo or video (from the viewer) or a folder with
+everything below it (from the folder page). Anyone with the link can view it without an
+account. Links can expire, need a password, and allow or block downloads (with
+downloads off, photos are shown as previews only and videos still play). Folder links
+show items added later. Manage links under **Sharing**; admins see everyone's. Set
+`PIXELGROVE_PUBLIC_URL` so links use your public address.
 
 ## Configuration
 

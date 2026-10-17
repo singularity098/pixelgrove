@@ -2,16 +2,16 @@
   import { del, get, post, put } from '../lib/api';
   import { session } from '../lib/session.svelte';
   import {
-    downloadUrl,
-    fileUrl,
     formatBytes,
     formatDate,
     formatDuration,
-    largeUrl,
+    libraryUrls,
     type MediaDetail,
     type MediaItem,
+    type MediaUrls,
   } from '../lib/media.svelte';
   import Icon from './Icon.svelte';
+  import ShareDialog from './ShareDialog.svelte';
 
   let {
     items,
@@ -21,6 +21,9 @@
     onclose,
     onneedmore,
     onremoved,
+    urls = libraryUrls,
+    readOnly = false,
+    closable = true,
   }: {
     items: MediaItem[];
     index: number;
@@ -29,11 +32,17 @@
     onclose: () => void;
     onneedmore: () => Promise<boolean>;
     onremoved: (id: number) => void;
+    /** Where media comes from: the library, or a share link. */
+    urls?: MediaUrls;
+    /** Share links: no favorites, trash or sharing. */
+    readOnly?: boolean;
+    closable?: boolean;
   } = $props();
 
   const canEdit = $derived(
-    session.current.status === 'signed-in' && session.current.user.role !== 'viewer',
+    !readOnly && session.current.status === 'signed-in' && session.current.user.role !== 'viewer',
   );
+  let sharing = $state(false);
 
   const MAX_SCALE = 8;
   const item = $derived(items[index]);
@@ -56,7 +65,7 @@
     resetZoom();
     wantOriginal = false;
     for (const neighbour of [items[index + 1], items[index - 1]]) {
-      if (neighbour?.kind === 'image') new Image().src = largeUrl(neighbour);
+      if (neighbour?.kind === 'image') new Image().src = urls.large(neighbour);
     }
     if (index >= items.length - 3 && items.length < total) onneedmore();
   });
@@ -65,9 +74,12 @@
   $effect(() => {
     const id = item.id;
     detail = null;
-    get<MediaDetail>(`/media/${id}`).then((d) => {
-      if (d.id === item.id) detail = d;
-    });
+    get<MediaDetail>(urls.detail(id)).then(
+      (d) => {
+        if (d.id === item.id) detail = d;
+      },
+      () => {},
+    );
   });
 
   async function toggleFavorite() {
@@ -235,8 +247,9 @@
     if (event.target instanceof HTMLInputElement) return;
     switch (event.key) {
       case 'Escape':
+        if (sharing) return;
         if (scale > 1) resetZoom();
-        else onclose();
+        else if (closable) onclose();
         break;
       case 'ArrowLeft':
         prev();
@@ -273,7 +286,7 @@
     }
     // Clipboards reliably accept only PNG, so convert the large preview.
     const png = (async () => {
-      const blob = await (await fetch(largeUrl(item))).blob();
+      const blob = await (await fetch(urls.large(item))).blob();
       const bitmap = await createImageBitmap(blob);
       const canvas = document.createElement('canvas');
       canvas.width = bitmap.width;
@@ -292,17 +305,24 @@
     }
   }
 
-  const src = $derived(item.kind === 'image' ? (wantOriginal ? fileUrl(item) : largeUrl(item)) : fileUrl(item));
+  // Zooming in swaps to the original, when it may be fetched.
+  const original = $derived(urls.file(item));
+  const src = $derived(
+    item.kind === 'image' ? (wantOriginal && original ? original : urls.large(item)) : (original ?? ''),
+  );
+  const download = $derived(urls.download(item));
 </script>
 
 <svelte:window {onkeydown} />
 
 <div class="viewer" role="dialog" aria-modal="true" aria-label={item.name}>
   <div class="toolbar">
-    <button class="icon" onclick={onclose} aria-label="Close" title="Close (Esc)"><Icon name="back" /></button>
+    {#if closable}
+      <button class="icon" onclick={onclose} aria-label="Close" title="Close (Esc)"><Icon name="back" /></button>
+    {/if}
     <div class="title">
       <div class="name">{item.name}</div>
-      <div class="sub">{formatDate(item.taken_at, true)} · {index + 1} of {total.toLocaleString()}</div>
+      <div class="sub">{formatDate(item.taken_at, true)}{total > 1 ? ` · ${index + 1} of ${total.toLocaleString()}` : ''}</div>
     </div>
     {#if item.kind === 'image'}
       <button class="icon" onclick={() => (scale > 1 ? resetZoom() : zoomTo(2.5))} aria-label={scale > 1 ? 'Zoom out' : 'Zoom in'} title={scale > 1 ? 'Zoom out' : 'Zoom in'}>
@@ -315,7 +335,12 @@
         <Icon name={detail?.favorite ? 'heartFilled' : 'favorite'} />
       </button>
     {/if}
-    <a class="icon-link" href={downloadUrl(item)} download={item.name} aria-label="Download" title="Download"><Icon name="download" /></a>
+    {#if canEdit}
+      <button class="icon" onclick={() => (sharing = true)} aria-label="Share" title="Share"><Icon name="sharing" /></button>
+    {/if}
+    {#if download}
+      <a class="icon-link" href={download} download={item.name} aria-label="Download" title="Download"><Icon name="download" /></a>
+    {/if}
     <button class="icon" class:on={showInfo} onclick={() => (showInfo = !showInfo)} aria-label="Info" title="Info (i)"><Icon name="info" /></button>
     {#if canEdit}
       <button class="icon" onclick={moveToTrash} disabled={trashing} aria-label="Move to trash" title="Move to trash (Delete)"><Icon name="trash" /></button>
@@ -380,7 +405,7 @@
               <dt>Lens</dt>
               <dd>{detail.lens}</dd>
             {/if}
-            {#if detail.latitude !== null && detail.longitude !== null}
+            {#if detail.latitude != null && detail.longitude != null}
               <dt>Location</dt>
               <dd>
                 <a href="https://www.openstreetmap.org/?mlat={detail.latitude}&mlon={detail.longitude}#map=15/{detail.latitude}/{detail.longitude}" target="_blank" rel="noopener noreferrer">
@@ -392,8 +417,10 @@
               <dt>Description</dt>
               <dd>{detail.description}</dd>
             {/if}
-            <dt>File</dt>
-            <dd class="path">{detail.path}</dd>
+            {#if detail.path}
+              <dt>File</dt>
+              <dd class="path">{detail.path}</dd>
+            {/if}
             <dt>Modified</dt>
             <dd>{new Date(detail.modified_at * 1000).toLocaleString()}</dd>
           </dl>
@@ -405,6 +432,9 @@
   </div>
 
   {#if toast}<div class="toast" role="status">{toast}</div>{/if}
+  {#if sharing}
+    <ShareDialog target={{ media_id: item.id, name: item.name }} onclose={() => (sharing = false)} />
+  {/if}
 </div>
 
 <style>

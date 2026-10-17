@@ -9,6 +9,7 @@ mod metadata;
 mod preview;
 mod scanner;
 mod server;
+mod shares;
 #[cfg(test)]
 mod testdata;
 mod trash;

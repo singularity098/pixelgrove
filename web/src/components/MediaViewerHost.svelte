@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MediaSource } from '../lib/media.svelte';
+  import { libraryUrls, type MediaSource, type MediaUrls } from '../lib/media.svelte';
   import { setParam } from '../lib/query';
   import { route } from '../lib/router.svelte';
   import Viewer from './Viewer.svelte';
@@ -8,7 +8,11 @@
    * Shows the viewer for `?m=<media id>` over any page, paging through `source`.
    * Keeping the open item in the URL means Back closes the viewer and links work.
    */
-  let { source }: { source: MediaSource } = $props();
+  let {
+    source,
+    urls = libraryUrls,
+    readOnly = false,
+  }: { source: MediaSource; urls?: MediaUrls; readOnly?: boolean } = $props();
 
   const openId = $derived(Number(route.query.get('m')) || null);
   const openIndex = $derived(openId === null ? -1 : source.items.findIndex((m) => m.id === openId));

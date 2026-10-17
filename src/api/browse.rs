@@ -165,7 +165,7 @@ pub struct Crumb {
 
 #[derive(Serialize)]
 pub struct Subfolder {
-    id: i64,
+    pub id: i64,
     name: String,
     /// Media in this folder and everything below it.
     count: i64,
@@ -255,9 +255,24 @@ fn folder_detail(conn: &Connection, user: &User, id: i64) -> ApiResult<FolderDet
     }
     breadcrumbs.reverse();
 
+    let subfolders = subfolders_of(conn, folder.id)?;
+
+    Ok(FolderDetail {
+        id: folder.id,
+        name: display_name(&folder),
+        path: relative(&folder.path, &folder.root),
+        media_count: folder.media_count,
+        breadcrumbs,
+        subfolders,
+    })
+}
+
+/// Child folders that have media somewhere below them, with nested counts and the
+/// newest cover, newest first.
+pub(super) fn subfolders_of(conn: &Connection, folder_id: i64) -> anyhow::Result<Vec<Subfolder>> {
     let children: Vec<(i64, String, String)> = conn
         .prepare("SELECT id, name, path FROM folders WHERE parent_id = ?1")?
-        .query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .query_map([folder_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let mut subfolders = Vec::new();
     for (child_id, name, path) in children {
@@ -295,15 +310,7 @@ fn folder_detail(conn: &Connection, user: &User, id: i64) -> ApiResult<FolderDet
         });
     }
     subfolders.sort_by_key(|s| std::cmp::Reverse(s.latest_taken_at));
-
-    Ok(FolderDetail {
-        id: folder.id,
-        name: display_name(&folder),
-        path: relative(&folder.path, &folder.root),
-        media_count: folder.media_count,
-        breadcrumbs,
-        subfolders,
-    })
+    Ok(subfolders)
 }
 
 pub(super) fn display_name(folder: &FolderRow) -> String {
@@ -317,7 +324,7 @@ pub(super) fn display_name(folder: &FolderRow) -> String {
 #[derive(Serialize)]
 pub struct MediaItem {
     id: i64,
-    name: String,
+    pub name: String,
     kind: String,
     /// Display dimensions (already swapped for rotated photos).
     width: Option<u32>,

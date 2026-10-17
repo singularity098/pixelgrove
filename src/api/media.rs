@@ -45,7 +45,7 @@ impl MediaRow {
     }
 }
 
-fn load(conn: &Connection, id: i64) -> rusqlite::Result<Option<MediaRow>> {
+pub(super) fn load(conn: &Connection, id: i64) -> rusqlite::Result<Option<MediaRow>> {
     conn.query_row(
         "SELECT m.id, m.folder_id, f.path, m.name, m.kind, m.size, m.mtime, m.taken_at,
                 m.tz_offset, m.width, m.height, m.orientation, m.duration_ms, m.camera_make,

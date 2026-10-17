@@ -6,7 +6,9 @@ mod favorites;
 mod files;
 mod library;
 mod media;
+mod public;
 mod search;
+mod shares;
 mod timeline;
 mod trash;
 mod users;
@@ -60,6 +62,17 @@ pub fn router() -> Router<AppState> {
         .route("/trash/{id}/preview/{variant}", get(trash::preview))
         .route("/trash/{id}/file", get(trash::file))
         .route("/storage", get(library::storage))
+        .route("/shares", get(shares::list).post(shares::create))
+        .route("/shares/{id}", patch(shares::update).delete(shares::delete))
+        .route("/s/{token}", get(public::open))
+        .route("/s/{token}/unlock", post(public::unlock))
+        .route("/s/{token}/folder", get(public::folder))
+        .route("/s/{token}/media/{id}", get(public::media_detail))
+        .route(
+            "/s/{token}/media/{id}/preview/{variant}",
+            get(public::preview),
+        )
+        .route("/s/{token}/media/{id}/file", get(public::file))
         .route("/search", get(search::search))
         .route("/timeline", get(timeline::timeline))
         .route("/timeline/months", get(timeline::months))
@@ -199,7 +212,7 @@ impl FromRequestParts<AppState> for AdminUser {
 
 /// Whether the client reached us over HTTPS (directly or via a reverse proxy), which
 /// decides whether cookies get the `Secure` flag.
-fn is_https(state: &AppState, headers: &HeaderMap) -> bool {
+pub(super) fn is_https(state: &AppState, headers: &HeaderMap) -> bool {
     state
         .config
         .public_url

@@ -1,18 +1,22 @@
 <script lang="ts">
-  import { formatDuration, thumbUrl, fileUrl, type MediaItem } from '../lib/media.svelte';
+  import { formatDuration, libraryUrls, type MediaItem, type MediaUrls } from '../lib/media.svelte';
   import Icon from './Icon.svelte';
 
-  let { items, onopen }: { items: MediaItem[]; onopen: (index: number) => void } = $props();
+  let {
+    items,
+    onopen,
+    urls = libraryUrls,
+  }: { items: MediaItem[]; onopen: (index: number) => void; urls?: MediaUrls } = $props();
 </script>
 
 <div class="grid">
   {#each items as item, index (item.id)}
     <button class="tile" onclick={() => onopen(index)} aria-label="Open {item.name}">
       {#if item.kind === 'video'}
-        <video src="{fileUrl(item)}#t=0.5" preload="metadata" muted playsinline disablepictureinpicture tabindex="-1"></video>
+        <video src="{urls.file(item)}#t=0.5" preload="metadata" muted playsinline disablepictureinpicture tabindex="-1"></video>
         <span class="badge"><Icon name="play" size={12} />{formatDuration(item.duration_ms)}</span>
       {:else}
-        <img src={thumbUrl(item)} alt="" loading="lazy" decoding="async" />
+        <img src={urls.thumb(item)} alt="" loading="lazy" decoding="async" />
       {/if}
     </button>
   {/each}

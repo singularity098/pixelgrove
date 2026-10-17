@@ -1,17 +1,21 @@
 <script lang="ts">
-  import { fileUrl, thumbUrl, type Cover } from '../lib/media.svelte';
+  import { libraryUrls, type Cover, type MediaUrls } from '../lib/media.svelte';
 
   /** A cover or tile image; videos show their first frame. */
-  let { media, alt = '' }: { media: Cover | null; alt?: string } = $props();
+  let {
+    media,
+    alt = '',
+    urls = libraryUrls,
+  }: { media: Cover | null; alt?: string; urls?: MediaUrls } = $props();
   let failed = $state(false);
 </script>
 
 {#if !media || failed}
   <div class="placeholder"></div>
 {:else if media.kind === 'video'}
-  <video src="{fileUrl(media)}#t=0.5" preload="metadata" muted playsinline disablepictureinpicture tabindex="-1"></video>
+  <video src="{urls.file(media)}#t=0.5" preload="metadata" muted playsinline disablepictureinpicture tabindex="-1"></video>
 {:else}
-  <img src={thumbUrl(media)} {alt} loading="lazy" decoding="async" onerror={() => (failed = true)} />
+  <img src={urls.thumb(media)} {alt} loading="lazy" decoding="async" onerror={() => (failed = true)} />
 {/if}
 
 <style>

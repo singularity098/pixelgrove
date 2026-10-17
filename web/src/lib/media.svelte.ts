@@ -72,17 +72,18 @@ export interface TreeFolder {
 }
 
 export interface MediaDetail extends MediaItem {
-  folder_id: number;
-  path: string;
+  folder_id?: number;
+  /** Absent for share links. */
+  path?: string;
   modified_at: number;
   tz_offset: number | null;
   camera_make: string | null;
   camera_model: string | null;
   lens: string | null;
-  latitude: number | null;
-  longitude: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
   description: string | null;
-  favorite: boolean;
+  favorite?: boolean;
 }
 
 export interface Paged<T> {
@@ -90,10 +91,41 @@ export interface Paged<T> {
   total: number;
 }
 
-export const thumbUrl = (m: { id: number; v: number }) => `/api/media/${m.id}/preview/thumb?v=${m.v}`;
-export const largeUrl = (m: { id: number; v: number }) => `/api/media/${m.id}/preview/large?v=${m.v}`;
-export const fileUrl = (m: { id: number; v: number }) => `/api/media/${m.id}/file?v=${m.v}`;
-export const downloadUrl = (m: { id: number; v: number }) => `/api/media/${m.id}/file?v=${m.v}&download=true`;
+type Versioned = { id: number; v: number };
+
+/** Where a page fetches media from: the library, or a share link. */
+export interface MediaUrls {
+  thumb(m: Versioned): string;
+  large(m: Versioned): string;
+  /** The original; null when not allowed (a share with downloads off, for photos). */
+  file(m: Versioned & { kind: string }): string | null;
+  download(m: Versioned): string | null;
+  detail(id: number): string;
+}
+
+export const libraryUrls: MediaUrls = {
+  thumb: (m) => `/api/media/${m.id}/preview/thumb?v=${m.v}`,
+  large: (m) => `/api/media/${m.id}/preview/large?v=${m.v}`,
+  file: (m) => `/api/media/${m.id}/file?v=${m.v}`,
+  download: (m) => `/api/media/${m.id}/file?v=${m.v}&download=true`,
+  detail: (id) => `/media/${id}`,
+};
+
+export function shareUrls(token: string, allowDownload: boolean): MediaUrls {
+  const base = `/api/s/${token}/media`;
+  return {
+    thumb: (m) => `${base}/${m.id}/preview/thumb?v=${m.v}`,
+    large: (m) => `${base}/${m.id}/preview/large?v=${m.v}`,
+    file: (m) => (allowDownload || m.kind === 'video' ? `${base}/${m.id}/file?v=${m.v}` : null),
+    download: (m) => (allowDownload ? `${base}/${m.id}/file?v=${m.v}&download=true` : null),
+    detail: (id) => `/s/${token}/media/${id}`,
+  };
+}
+
+export const thumbUrl = libraryUrls.thumb;
+export const largeUrl = libraryUrls.large;
+export const fileUrl = (m: Versioned) => libraryUrls.file({ ...m, kind: 'video' })!;
+export const downloadUrl = (m: Versioned) => libraryUrls.download(m)!;
 
 /** A growing list loaded page by page. */
 export class PagedList<T> {

@@ -131,6 +131,34 @@ CREATE TABLE trash (
 );
 CREATE INDEX trash_deleted ON trash(deleted_at);
 "#,
+    r#"
+-- Server-wide values, e.g. the secret that signs share-link unlock cookies.
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+) WITHOUT ROWID;
+
+-- Public links to a single item or a folder (and everything below it).
+CREATE TABLE shares (
+    id             INTEGER PRIMARY KEY,
+    token          TEXT NOT NULL UNIQUE,
+    kind           TEXT NOT NULL CHECK (kind IN ('media', 'folder')),
+    media_id       INTEGER REFERENCES media(id) ON DELETE CASCADE,
+    -- Folders are shared by path, so the link survives rescans.
+    folder_path    TEXT,
+    created_by     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at     INTEGER NOT NULL,
+    expires_at     INTEGER,
+    password_hash  TEXT,
+    allow_download INTEGER NOT NULL DEFAULT 1,
+    views          INTEGER NOT NULL DEFAULT 0,
+    last_viewed_at INTEGER,
+    CHECK ((kind = 'media') = (media_id IS NOT NULL)),
+    CHECK ((kind = 'folder') = (folder_path IS NOT NULL))
+);
+CREATE INDEX shares_media ON shares(media_id);
+CREATE INDEX shares_creator ON shares(created_by);
+"#,
 ];
 
 #[derive(Clone)]

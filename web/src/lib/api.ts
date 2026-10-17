@@ -41,7 +41,8 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
   if (response.status === 204) return undefined as T;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && !path.startsWith('/auth/login')) onUnauthorized();
+    // Share-link pages work without an account, so a 401 there means nothing.
+    if (response.status === 401 && !path.startsWith('/auth/login') && !path.startsWith('/s/')) onUnauthorized();
     throw new ApiError(response.status, data.error ?? `Request failed (${response.status}).`);
   }
   return data as T;
