@@ -2,7 +2,7 @@
 
 An ultra-light, fast, self-hosted photo and video library written in Rust.
 
-> **Status:** early development (milestone M0 — scaffold). See
+> **Status:** early development (milestone M1 — indexer). See
 > [docs/requirements.md](docs/requirements.md) and [docs/plan.md](docs/plan.md).
 
 ## Running with Docker
@@ -25,6 +25,7 @@ Settings come from `/config/pixelgrove.toml` (optional), overridden by environme
 | `PIXELGROVE_PUBLIC_URL` | — | External URL used in share links |
 | `PIXELGROVE_PREVIEW_CACHE_MB` | `256` | In-memory preview cache size |
 | `PIXELGROVE_RESCAN_INTERVAL_HOURS` | `6` | Hours between full rescans |
+| `PIXELGROVE_EXCLUDE` | `@eaDir,#recycle,#snapshot,lost+found` | Comma-separated name globs to skip (hidden entries are always skipped) |
 | `PIXELGROVE_LOG` | `info` | Log filter (e.g. `debug`) |
 
 Apart from `PIXELGROVE_LOG`, the same keys (lower-case, without the prefix) can be used in `pixelgrove.toml`.
@@ -43,6 +44,14 @@ cd web && npm install && npm run dev
 
 Checks run in CI: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
 `cargo test`, and `npm run check && npm run build` in `web/`.
+
+To benchmark the indexer, generate a synthetic library and point a release build at it:
+
+```sh
+python3 scripts/gen-bench-library.py /tmp/bench-lib 100000
+PIXELGROVE_CONFIG_DIR=/tmp/bench-cfg PIXELGROVE_MEDIA_ROOTS=/tmp/bench-lib cargo run --release
+curl localhost:8080/api/library/status
+```
 
 A release build (`cd web && npm run build && cd .. && cargo build --release`) embeds the
 UI in the single `pixelgrove` binary.

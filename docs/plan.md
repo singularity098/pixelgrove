@@ -135,7 +135,17 @@ multiple languages, editing, upload.
 | Docker image | < 30 MB |
 | `/config` size | a few tens of MB (database only) |
 
-A synthetic 100k-file library will be generated for benchmarks in CI/local testing.
+A synthetic library can be generated with `scripts/gen-bench-library.py`.
+
+**Measured (M1, 100k small JPEGs in 1,026 folders, 4-core VM with SSD):**
+
+| Metric | Result |
+|---|---|
+| Initial scan | 3.8–4.6 s (real photos on spinning disks/NAS will be I/O-bound and slower) |
+| No-change rescan | 0.4–0.6 s |
+| Database size | 14 MB |
+| Memory, idle after scans | ~45 MB (17 MB with the Docker image's allocator settings) |
+| Memory, peak during first scan | ~145 MB |
 
 ---
 
@@ -144,7 +154,7 @@ A synthetic 100k-file library will be generated for benchmarks in CI/local testi
 | # | Milestone | Contents |
 |---|---|---|
 | M0 ✅ | **Scaffold** | Cargo project, Svelte app embedded via `rust-embed`, config loading, Dockerfile (multi-arch), GitHub Actions CI + GHCR publish |
-| M1 | **Indexer** | SQLite schema + migrations, parallel scanner, EXIF/video metadata, folder aggregates, watcher, periodic rescan, exclusions |
+| M1 ✅ | **Indexer** | SQLite schema + migrations, parallel scanner, EXIF/video metadata, folder aggregates, watcher, periodic rescan, exclusions |
 | M2 | **Auth & users** | First-run setup, login, sessions, roles, folder restrictions, user management |
 | M3 | **Core browsing** | App shell + sidebar, dark/light theme, Photos (folders) view, folder view, preview pipeline, photo/video viewer (zoom, wheel, swipe, download, clipboard, info) |
 | M4 | **Timeline, File View, Search** | Timeline with scrubber, File View tree + filter, global search |

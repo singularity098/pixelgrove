@@ -1,6 +1,13 @@
+mod alloc;
 mod assets;
 mod config;
+mod db;
+mod indexer;
+mod metadata;
+mod scanner;
 mod server;
+#[cfg(test)]
+mod testdata;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,10 +18,16 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
+use crate::db::Db;
+use crate::indexer::Indexer;
 use crate::server::AppState;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    alloc::tune();
+    tokio::runtime::Runtime::new()?.block_on(run())
+}
+
+async fn run() -> Result<()> {
     match std::env::args().nth(1).as_deref() {
         None | Some("serve") => serve().await,
         Some("healthcheck") => healthcheck().await,
@@ -49,8 +62,14 @@ async fn serve() -> Result<()> {
         "PixelGrove started"
     );
 
+    let db = Db::open(&config.config_dir.join(db::DB_FILE_NAME))?;
+    let indexer = Indexer::new(db.clone(), &config)?;
+    indexer.start();
+
     let app = server::router(AppState {
         config: Arc::new(config),
+        db,
+        indexer,
     });
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())

@@ -30,7 +30,9 @@ FROM scratch
 COPY --from=build /pixelgrove /pixelgrove
 ENV PIXELGROVE_CONFIG_DIR=/config \
     PIXELGROVE_MEDIA_ROOTS=/media \
-    PIXELGROVE_BIND=0.0.0.0:8080
+    PIXELGROVE_BIND=0.0.0.0:8080 \
+    MIMALLOC_ARENA_EAGER_COMMIT=0 \
+    MIMALLOC_PURGE_DELAY=0
 VOLUME ["/config"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD ["/pixelgrove", "healthcheck"]
