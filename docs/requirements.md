@@ -1,0 +1,21 @@
+### Pixelgrove
+- Application is an image/video media viewing/library application
+- Ultra light and lightning fast web application, built in Rust
+- Beautiful interface, dark mode by default, with light mode available
+- Works great on desktop or on mobile
+- Application is primarily intended to be installed via docker, with directories mapped either directly to or as subdirectories inside /media/
+- Any other directory may be manually added in the settings as well though, it is flexible
+- Very simple to use, simply add watch directories and it will scan them
+- The configuration files directory is kept very light, there is NO generation or caching of thumbnails!  This may negatively impact performance but I prefer keeping the directory small.
+- A database to track the library for changes is fine, but it must be FAST.
+- It has a sidebar which can pop in and out, containing items for Photos (the default directory view), Timeline, Explore, Map, Sharing, Favorites, File View, Trash, and it displays storage space
+- Can search through your entire library for directories and for files.  If any searched string appears in the directory name, file name, or metadata, the search is returned
+- There is by default an administrator account, and accounts can be created with various levels of authority, including view-only accounts which have no changeable options
+- Any directory containing photos can be navigated into, similar to how most Android/mobile photo libraries work
+- Default view is all directories displayed in reverse chronological order based on files timestamps.  The directory shows the most recently updated photo inside of that directory
+- When a user descends into a directory, all files are displayed also in reverse chronological order
+- A share button is available for any directory or for any individual file, which can generate a link requiring no login to view
+- Besides the default view mode of showing all directories in a reverse chronological order, the user may also browser the photos via a file view.  This file view also has a filter mode which works like search, showing only the directories which match the search
+- When viewing a photo, there is a zoom button and the user may also use their mouse wheel to zoom
+- The user may also when viewing a photo, copy the image to clipboard, download, share, view information and metadata, favorite
+- When viewing a photo or directory, there is a slideshow button which starts a slideshow
