@@ -96,7 +96,12 @@
     ...(editor ? [{ href: '/trash', label: 'Trash', icon: 'trash' as IconName }] : []),
   ]);
   const account = $derived<Item[]>([
-    ...(user.role === 'admin' ? [{ href: '/users', label: 'Users', icon: 'users' as IconName }] : []),
+    ...(user.role === 'admin'
+      ? [
+          { href: '/users', label: 'Users', icon: 'users' as IconName },
+          { href: '/settings', label: 'Settings', icon: 'settings' as IconName },
+        ]
+      : []),
     { href: '/account', label: 'Account', icon: 'account' },
   ]);
 

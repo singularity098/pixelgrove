@@ -2,6 +2,7 @@
   import Icon from '../components/Icon.svelte';
   import MediaGrid from '../components/MediaGrid.svelte';
   import MediaViewerHost from '../components/MediaViewerHost.svelte';
+  import Slideshow from '../components/Slideshow.svelte';
   import Thumb from '../components/Thumb.svelte';
   import Viewer from '../components/Viewer.svelte';
   import { get, post } from '../lib/api';
@@ -9,6 +10,7 @@
   import { openViewer, withParam } from '../lib/query';
   import { navigate, onVisible, route } from '../lib/router.svelte';
   import { SharedFolder, type ShareInfo } from '../lib/shared.svelte';
+  import { slideshowSettings } from '../lib/slideshow.svelte';
   import { currentTheme, setTheme, type Theme } from '../theme';
 
   /** A share link, opened by anyone (no account needed). */
@@ -46,6 +48,14 @@
   const subpath = $derived(route.query.get('p') ?? '');
   const folder = $derived(info && !info.locked && info.kind === 'folder' ? new SharedFolder(token, subpath) : null);
   const crumbs = $derived(subpath ? subpath.split('/') : []);
+
+  let slideshow = $state(false);
+  const hasSubfolders = $derived(!!folder?.subfolders.length);
+  const slides = $derived(
+    slideshow && folder && hasSubfolders && slideshowSettings.subfolders
+      ? new SharedFolder(token, subpath, true)
+      : folder,
+  );
 
   function openFolder(path: string) {
     navigate(`/s/${token}${path ? `?p=${encodeURIComponent(path)}` : ''}`);
@@ -108,7 +118,12 @@
           <button class="crumb" onclick={() => openFolder(crumbs.slice(0, i + 1).join('/'))}>{crumb}</button>
         {/each}
       </nav>
-      <h2>{crumbs.at(-1) ?? info?.name}</h2>
+      <div class="title">
+        <h2>{crumbs.at(-1) ?? info?.name}</h2>
+        {#if folder.items.length || folder.subfolders.length}
+          <button class="ghost action" onclick={() => (slideshow = true)}><Icon name="slideshow" size={16} /> Slideshow</button>
+        {/if}
+      </div>
       <p class="muted small">
         {#if folder.total !== null}{folder.total.toLocaleString()} item{folder.total === 1 ? '' : 's'}{/if}
         {#if info?.expires_at} · link expires {formatDate(info.expires_at)}{/if}
@@ -131,10 +146,27 @@
       <div use:onVisible={() => folder.more()}></div>
     </section>
     <MediaViewerHost source={folder} {urls} readOnly />
+    {#if slideshow && slides}
+      <Slideshow source={slides} {urls} allowSubfolders={hasSubfolders} onclose={() => (slideshow = false)} />
+    {/if}
   {/key}
 {/if}
 
 <style>
+  .title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+  }
+
   header {
     display: flex;
     align-items: center;

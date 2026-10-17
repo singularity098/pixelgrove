@@ -3,22 +3,32 @@
   import Icon from '../components/Icon.svelte';
   import MediaViewerHost from '../components/MediaViewerHost.svelte';
   import ShareDialog from '../components/ShareDialog.svelte';
+  import Slideshow from '../components/Slideshow.svelte';
   import Thumb from '../components/Thumb.svelte';
   import { get } from '../lib/api';
   import { PagedList, type FolderDetail, type MediaItem } from '../lib/media.svelte';
   import { openViewer } from '../lib/query';
   import { link, onVisible } from '../lib/router.svelte';
   import { session } from '../lib/session.svelte';
+  import { slideshowSettings } from '../lib/slideshow.svelte';
 
   let { id }: { id: number } = $props();
 
-  let folder: FolderDetail | null = $state(null);
+  let folder = $state<FolderDetail | null>(null);
   let error = $state('');
   let sharing = $state(false);
   const canShare = $derived(session.current.status === 'signed-in' && session.current.user.role !== 'viewer');
   // The page is keyed on the folder id, so this is created once per folder.
   // svelte-ignore state_referenced_locally
   const media = new PagedList<MediaItem>(`/folders/${id}/media`, 200);
+
+  let slideshow = $state(false);
+  const hasSubfolders = $derived(!!folder?.subfolders.length);
+  const slides = $derived(
+    slideshow && hasSubfolders && slideshowSettings.subfolders
+      ? new PagedList<MediaItem>(`/folders/${id}/media?recursive=true`, 200)
+      : media,
+  );
 
   $effect(() => {
     get<FolderDetail>(`/folders/${id}`)
@@ -39,9 +49,14 @@
     </nav>
     <div class="title">
       <h2>{folder.name}</h2>
-      {#if canShare}
-        <button class="ghost share" onclick={() => (sharing = true)}><Icon name="sharing" size={16} /> Share</button>
-      {/if}
+      <div class="actions">
+        {#if folder.media_count || folder.subfolders.length}
+          <button class="ghost action" onclick={() => (slideshow = true)}><Icon name="slideshow" size={16} /> Slideshow</button>
+        {/if}
+        {#if canShare}
+          <button class="ghost action" onclick={() => (sharing = true)}><Icon name="sharing" size={16} /> Share</button>
+        {/if}
+      </div>
     </div>
     <p class="muted small">{folder.media_count.toLocaleString()} item{folder.media_count === 1 ? '' : 's'}</p>
 
@@ -66,6 +81,10 @@
 </section>
 
 <MediaViewerHost source={media} />
+
+{#if slideshow}
+  <Slideshow source={slides} allowSubfolders={hasSubfolders} onclose={() => (slideshow = false)} />
+{/if}
 
 {#if sharing && folder}
   <ShareDialog target={{ folder_id: folder.id, name: folder.name }} onclose={() => (sharing = false)} />
@@ -96,11 +115,25 @@
     gap: 12px;
   }
 
-  .share {
+  .actions {
+    display: flex;
+    gap: 6px;
+    flex: none;
+  }
+
+  .action {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    flex: none;
+  }
+
+  @media (max-width: 520px) {
+    /* Icon-only buttons on phones, so the folder name keeps its room. */
+    .action {
+      font-size: 0;
+      gap: 0;
+      padding: 8px 10px;
+    }
   }
 
   .subfolders {

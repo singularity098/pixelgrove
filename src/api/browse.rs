@@ -362,40 +362,84 @@ impl MediaItem {
 /// Columns read by [`MediaItem::from_row`], for a `media` table aliased `m`.
 pub(super) const MEDIA_ITEM_COLUMNS: &str = "m.id, m.name, m.kind, m.width, m.height, m.orientation, m.taken_at, m.duration_ms, m.mtime, m.size";
 
+#[derive(Deserialize)]
+pub struct FolderMediaQuery {
+    #[serde(default)]
+    offset: i64,
+    #[serde(default = "default_limit")]
+    limit: i64,
+    /// Also include everything in subfolders (for slideshows).
+    #[serde(default)]
+    recursive: bool,
+}
+
 pub async fn folder_media(
     State(state): State<AppState>,
     current: CurrentUser,
     UrlPath(id): UrlPath<i64>,
-    Query(page): Query<Page>,
+    Query(query): Query<FolderMediaQuery>,
 ) -> ApiResult<Json<Paged<MediaItem>>> {
     let user = current.user;
-    let (offset, limit) = page.clamped();
+    let (offset, limit) = Page {
+        offset: query.offset,
+        limit: query.limit,
+    }
+    .clamped();
     let result = state
         .db
-        .run(move |conn| Ok(folder_media_page(conn, &user, id, offset, limit)))
+        .run(move |conn| {
+            Ok(visible_folder(conn, &user, id).and_then(|folder| {
+                let recursive = query.recursive.then(|| scope(&user, "f.path"));
+                Ok(media_page(conn, &folder, recursive, offset, limit)?)
+            }))
+        })
         .await??;
     Ok(Json(result))
 }
 
-fn folder_media_page(
+/// A page of a folder's media, newest first. With `recursive` (a scope condition on
+/// `f.path` for the subfolders that may be included), media below it is included too.
+pub(super) fn media_page(
     conn: &Connection,
-    user: &User,
-    id: i64,
+    folder: &FolderRow,
+    recursive: Option<(String, Vec<String>)>,
     offset: i64,
     limit: i64,
-) -> ApiResult<Paged<MediaItem>> {
-    let folder = visible_folder(conn, user, id)?;
+) -> rusqlite::Result<Paged<MediaItem>> {
+    let Some((where_scope, scope_params)) = recursive else {
+        let items = conn
+            .prepare(&format!(
+                "SELECT {MEDIA_ITEM_COLUMNS} FROM media m WHERE m.folder_id = ?1
+                 ORDER BY m.taken_at DESC, m.id DESC LIMIT ?2 OFFSET ?3"
+            ))?
+            .query_map([folder.id, limit, offset], MediaItem::from_row)?
+            .collect::<rusqlite::Result<_>>()?;
+        return Ok(Paged {
+            items,
+            total: folder.media_count,
+        });
+    };
+    let (below, mut params) = subtree("f.path", &folder.path);
+    params.extend(scope_params);
+    let from = format!(
+        "FROM media m JOIN folders f ON f.id = m.folder_id WHERE {below} AND {where_scope}"
+    );
+    let total = conn.query_row(
+        &format!("SELECT count(*) {from}"),
+        params_from_iter(&params),
+        |r| r.get(0),
+    )?;
+    params.push(limit.to_string());
+    params.push(offset.to_string());
     let items = conn
         .prepare(&format!(
-            "SELECT {MEDIA_ITEM_COLUMNS} FROM media m WHERE m.folder_id = ?1
-             ORDER BY m.taken_at DESC, m.id DESC LIMIT ?2 OFFSET ?3"
+            "SELECT {MEDIA_ITEM_COLUMNS} {from}
+             ORDER BY m.taken_at DESC, m.id DESC
+             LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)"
         ))?
-        .query_map([folder.id, limit, offset], MediaItem::from_row)?
+        .query_map(params_from_iter(&params), MediaItem::from_row)?
         .collect::<rusqlite::Result<_>>()?;
-    Ok(Paged {
-        items,
-        total: folder.media_count,
-    })
+    Ok(Paged { items, total })
 }
 
 #[cfg(test)]
@@ -494,6 +538,41 @@ mod tests {
             .await;
         assert_eq!(names(&media.body["items"]), ["b.jpg", "a.jpg"]);
         assert_eq!(media.body["items"][0]["width"], 4);
+    }
+
+    #[tokio::test]
+    async fn recursive_folder_media() {
+        let app = TestApp::new();
+        library(&app);
+        let admin = app.setup_admin().await;
+        let root_id = app.folder_id("");
+        let uri = format!("/api/folders/{root_id}/media?recursive=true");
+        let all = app.send("GET", &uri, None, Some(&admin)).await;
+        assert_eq!(
+            names(&all.body["items"]),
+            ["c.jpg", "b.jpg", "a.jpg", "d.jpg"]
+        );
+        assert_eq!(all.body["total"], 4);
+        let page = app
+            .send(
+                "GET",
+                &format!("{uri}&offset=1&limit=2"),
+                None,
+                Some(&admin),
+            )
+            .await;
+        assert_eq!(names(&page.body["items"]), ["b.jpg", "a.jpg"]);
+
+        let y2024 = app.folder_id("2024");
+        let nested = app
+            .send(
+                "GET",
+                &format!("/api/folders/{y2024}/media?recursive=true"),
+                None,
+                Some(&admin),
+            )
+            .await;
+        assert_eq!(names(&nested.body["items"]), ["c.jpg", "d.jpg"]);
     }
 
     #[tokio::test]

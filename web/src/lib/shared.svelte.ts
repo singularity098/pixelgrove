@@ -22,6 +22,8 @@ export class SharedFolder implements MediaSource {
   constructor(
     private readonly token: string,
     readonly path: string,
+    /** Include everything below the folder (for slideshows). */
+    private readonly recursive = false,
   ) {}
 
   async more(): Promise<boolean> {
@@ -29,7 +31,7 @@ export class SharedFolder implements MediaSource {
     this.loading = true;
     try {
       const page = await get<{ name: string; subfolders: Subfolder[]; media: { items: MediaItem[]; total: number } }>(
-        `/s/${this.token}/folder?path=${encodeURIComponent(this.path)}&offset=${this.items.length}&limit=200`,
+        `/s/${this.token}/folder?path=${encodeURIComponent(this.path)}&offset=${this.items.length}&limit=200${this.recursive ? '&recursive=true' : ''}`,
       );
       if (this.items.length === 0) {
         this.name = page.name;

@@ -12,6 +12,7 @@
   } from '../lib/media.svelte';
   import Icon from './Icon.svelte';
   import ShareDialog from './ShareDialog.svelte';
+  import Slideshow from './Slideshow.svelte';
 
   let {
     items,
@@ -43,6 +44,26 @@
     !readOnly && session.current.status === 'signed-in' && session.current.user.role !== 'viewer',
   );
   let sharing = $state(false);
+  let slideshow = $state(false);
+  // The overflow menu on narrow screens.
+  let menu = $state(false);
+  // The slideshow pages through the same list, loading more as it goes.
+  const slides = {
+    get items() {
+      return items;
+    },
+    get total() {
+      return total;
+    },
+    more: () => onneedmore(),
+    remove() {},
+  };
+
+  function endSlideshow(lastId: number | null) {
+    slideshow = false;
+    const i = items.findIndex((m) => m.id === lastId);
+    if (i >= 0 && i !== index) onindex(i);
+  }
 
   const MAX_SCALE = 8;
   const item = $derived(items[index]);
@@ -196,6 +217,7 @@
   }
 
   function onpointerdown(event: PointerEvent) {
+    menu = false;
     if (item.kind !== 'image' || event.button !== 0) return;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -244,11 +266,12 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
-    if (event.target instanceof HTMLInputElement) return;
+    if (event.target instanceof HTMLInputElement || slideshow) return;
     switch (event.key) {
       case 'Escape':
         if (sharing) return;
-        if (scale > 1) resetZoom();
+        if (menu) menu = false;
+        else if (scale > 1) resetZoom();
         else if (closable) onclose();
         break;
       case 'ArrowLeft':
@@ -324,27 +347,41 @@
       <div class="name">{item.name}</div>
       <div class="sub">{formatDate(item.taken_at, true)}{total > 1 ? ` · ${index + 1} of ${total.toLocaleString()}` : ''}</div>
     </div>
-    {#if item.kind === 'image'}
-      <button class="icon" onclick={() => (scale > 1 ? resetZoom() : zoomTo(2.5))} aria-label={scale > 1 ? 'Zoom out' : 'Zoom in'} title={scale > 1 ? 'Zoom out' : 'Zoom in'}>
-        <Icon name={scale > 1 ? 'zoomOut' : 'zoomIn'} />
-      </button>
-      <button class="icon" onclick={copyImage} aria-label="Copy to clipboard" title="Copy to clipboard"><Icon name="copy" /></button>
-    {/if}
     {#if canEdit}
-      <button class="icon" class:on={detail?.favorite} onclick={toggleFavorite} disabled={!detail} aria-pressed={detail?.favorite ?? false} aria-label={detail?.favorite ? 'Remove from favorites' : 'Add to favorites'} title={detail?.favorite ? 'Remove from favorites' : 'Add to favorites'}>
+      <button class="icon" style="order: 4" class:on={detail?.favorite} onclick={toggleFavorite} disabled={!detail} aria-pressed={detail?.favorite ?? false} aria-label={detail?.favorite ? 'Remove from favorites' : 'Add to favorites'} title={detail?.favorite ? 'Remove from favorites' : 'Add to favorites'}>
         <Icon name={detail?.favorite ? 'heartFilled' : 'favorite'} />
       </button>
+      <button class="icon" style="order: 5" onclick={() => (sharing = true)} aria-label="Share" title="Share"><Icon name="sharing" /></button>
     {/if}
-    {#if canEdit}
-      <button class="icon" onclick={() => (sharing = true)} aria-label="Share" title="Share"><Icon name="sharing" /></button>
-    {/if}
-    {#if download}
-      <a class="icon-link" href={download} download={item.name} aria-label="Download" title="Download"><Icon name="download" /></a>
-    {/if}
-    <button class="icon" class:on={showInfo} onclick={() => (showInfo = !showInfo)} aria-label="Info" title="Info (i)"><Icon name="info" /></button>
-    {#if canEdit}
-      <button class="icon" onclick={moveToTrash} disabled={trashing} aria-label="Move to trash" title="Move to trash (Delete)"><Icon name="trash" /></button>
-    {/if}
+    <button class="icon" style="order: 8" class:on={showInfo} onclick={() => (showInfo = !showInfo)} aria-label="Info" title="Info (i)"><Icon name="info" /></button>
+    <!-- Inline on wide screens; a menu behind "More" on phones. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="more-menu" class:open={menu} onclick={() => (menu = false)}>
+      {#if item.kind === 'image'}
+        <button class="icon" style="order: 2" onclick={() => (scale > 1 ? resetZoom() : zoomTo(2.5))} aria-label={scale > 1 ? 'Zoom out' : 'Zoom in'} title={scale > 1 ? 'Zoom out' : 'Zoom in'}>
+          <Icon name={scale > 1 ? 'zoomOut' : 'zoomIn'} /><span class="label">{scale > 1 ? 'Zoom out' : 'Zoom in'}</span>
+        </button>
+        <button class="icon" style="order: 3" onclick={copyImage} aria-label="Copy to clipboard" title="Copy to clipboard">
+          <Icon name="copy" /><span class="label">Copy to clipboard</span>
+        </button>
+      {/if}
+      {#if download}
+        <a class="icon-link" style="order: 6" href={download} download={item.name} aria-label="Download" title="Download">
+          <Icon name="download" /><span class="label">Download</span>
+        </a>
+      {/if}
+      {#if total > 1}
+        <button class="icon" style="order: 7" onclick={() => (slideshow = true)} aria-label="Slideshow" title="Slideshow">
+          <Icon name="slideshow" /><span class="label">Slideshow</span>
+        </button>
+      {/if}
+      {#if canEdit}
+        <button class="icon" style="order: 9" onclick={moveToTrash} disabled={trashing} aria-label="Move to trash" title="Move to trash (Delete)">
+          <Icon name="trash" /><span class="label">Move to trash</span>
+        </button>
+      {/if}
+    </div>
+    <button class="icon more" class:on={menu} onclick={() => (menu = !menu)} aria-expanded={menu} aria-label="More actions" title="More"><Icon name="more" /></button>
   </div>
 
   <div class="body">
@@ -435,6 +472,9 @@
   {#if sharing}
     <ShareDialog target={{ media_id: item.id, name: item.name }} onclose={() => (sharing = false)} />
   {/if}
+  {#if slideshow}
+    <Slideshow source={slides} startId={item.id} {urls} onclose={endSlideshow} />
+  {/if}
 </div>
 
 <style>
@@ -487,6 +527,7 @@
   }
 
   .title {
+    order: 1;
     flex: 1;
     min-width: 0;
     padding: 0 6px;
@@ -502,6 +543,9 @@
   .sub {
     font-size: 0.8rem;
     color: #b0b6bc;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .body {
@@ -620,7 +664,59 @@
     font-size: 0.9rem;
   }
 
+  .more-menu {
+    display: contents;
+  }
+
+  .more-menu .label,
+  .toolbar button.more {
+    display: none;
+  }
+
+  .toolbar button.more {
+    order: 10;
+  }
+
   @media (max-width: 700px) {
+    .toolbar button.more {
+      display: grid;
+    }
+
+    .more-menu {
+      display: none;
+      position: absolute;
+      top: 52px;
+      right: 8px;
+      min-width: 210px;
+      padding: 6px;
+      flex-direction: column;
+      border-radius: 12px;
+      background: rgb(30 33 37 / 0.97);
+      border: 1px solid #2c3137;
+      box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+    }
+
+    .more-menu.open {
+      display: flex;
+    }
+
+    .more-menu .label {
+      display: inline;
+    }
+
+    .toolbar .more-menu button.icon,
+    .more-menu .icon-link {
+      width: auto;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 12px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 0.95rem;
+    }
+
     .info {
       position: absolute;
       left: 0;

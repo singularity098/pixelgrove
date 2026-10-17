@@ -3,10 +3,10 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, new_debouncer};
 use serde::Serialize;
@@ -18,6 +18,25 @@ use crate::scanner::{self, Excludes, ScanStats};
 
 /// How long the watcher waits for a burst of changes (e.g. a copy) to settle.
 const WATCH_DEBOUNCE: Duration = Duration::from_secs(3);
+
+/// Settings key holding the media folders added in the web UI (a JSON list of paths).
+const EXTRA_ROOTS_KEY: &str = "extra_media_roots";
+
+type Watcher = Debouncer<RecommendedWatcher, RecommendedCache>;
+
+/// Why a media folder couldn't be added or removed.
+#[derive(Debug)]
+pub enum RootError {
+    /// Explained to the user as-is.
+    Invalid(String),
+    Internal(anyhow::Error),
+}
+
+impl<E: Into<anyhow::Error>> From<E> for RootError {
+    fn from(err: E) -> Self {
+        Self::Internal(err.into())
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct IndexStatus {
@@ -37,7 +56,11 @@ struct Inner {
     db: Db,
     excludes: Excludes,
     rescan_interval: Duration,
-    roots: Vec<(i64, PathBuf)>,
+    /// Roots from the config file or environment; the web UI can't remove these.
+    configured: Vec<PathBuf>,
+    /// Every root (configured and added in the web UI) as `(id, path)`.
+    roots: RwLock<Vec<(i64, PathBuf)>>,
+    watcher: Mutex<Option<Watcher>>,
     status: Mutex<IndexStatus>,
     /// Serialises scans so watcher-triggered and periodic scans never overlap.
     scan_lock: tokio::sync::Mutex<()>,
@@ -46,13 +69,17 @@ struct Inner {
 impl Indexer {
     pub fn new(db: Db, config: &Config) -> Result<Self> {
         let excludes = Excludes::new(&config.exclude)?;
-        let roots = scanner::sync_roots(&db, &config.media_roots)?;
+        let configured = config.media_roots.clone();
+        let all = all_roots(&configured, &load_extra_roots(&db)?);
+        let roots = scanner::sync_roots(&db, &all)?;
         Ok(Self {
             inner: Arc::new(Inner {
                 db,
                 excludes,
                 rescan_interval: Duration::from_secs(config.rescan_interval_hours.max(1) * 3600),
-                roots,
+                configured,
+                roots: RwLock::new(roots),
+                watcher: Mutex::new(None),
                 status: Mutex::new(IndexStatus::default()),
                 scan_lock: tokio::sync::Mutex::new(()),
             }),
@@ -66,12 +93,10 @@ impl Indexer {
     /// Starts the background tasks: initial scan, watcher and periodic rescans.
     pub fn start(&self) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let watcher = self.watch(tx);
+        *self.inner.watcher.lock().unwrap() = self.watch(tx);
 
         let this = self.clone();
         tokio::spawn(async move {
-            // Keep the watcher alive for as long as the indexer runs.
-            let _watcher = watcher;
             let mut interval = tokio::time::interval(this.inner.rescan_interval);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
@@ -89,9 +114,10 @@ impl Indexer {
         let _guard = self.inner.scan_lock.lock().await;
         self.inner.status.lock().unwrap().scanning = true;
         let inner = self.inner.clone();
+        let roots = self.roots();
         let result = tokio::task::spawn_blocking(move || {
             let mut total = ScanStats::default();
-            for (id, root) in &inner.roots {
+            for (id, root) in &roots {
                 match scanner::scan(&inner.db, *id, root, root, &inner.excludes) {
                     Ok(stats) => total.add(&stats),
                     Err(err) => tracing::error!(root = %root.display(), "scan failed: {err:#}"),
@@ -118,10 +144,7 @@ impl Indexer {
         }
     }
 
-    fn watch(
-        &self,
-        tx: mpsc::UnboundedSender<PathBuf>,
-    ) -> Option<Debouncer<RecommendedWatcher, RecommendedCache>> {
+    fn watch(&self, tx: mpsc::UnboundedSender<PathBuf>) -> Option<Watcher> {
         let handler = move |result: DebounceEventResult| match result {
             Ok(events) => {
                 for event in events {
@@ -144,15 +167,8 @@ impl Indexer {
             }
         };
         let mut watching = false;
-        for (_, root) in &self.inner.roots {
-            match debouncer.watch(root, RecursiveMode::Recursive) {
-                Ok(()) => watching = true,
-                Err(err) => tracing::warn!(
-                    root = %root.display(),
-                    %err,
-                    "cannot watch root; changes will be picked up by periodic rescans"
-                ),
-            }
+        for (_, root) in self.roots() {
+            watching |= watch_root(&mut debouncer, &root);
         }
         self.inner.status.lock().unwrap().watching = watching;
         Some(debouncer)
@@ -189,16 +205,109 @@ impl Indexer {
         .await;
     }
 
-    /// The configured media roots as `(id, path)`.
-    pub fn roots(&self) -> &[(i64, PathBuf)] {
-        &self.inner.roots
+    /// Every media root as `(id, path)`.
+    pub fn roots(&self) -> Vec<(i64, PathBuf)> {
+        self.inner.roots.read().unwrap().clone()
+    }
+
+    /// Whether `path` comes from the config file or environment (not removable here).
+    pub fn is_configured(&self, path: &Path) -> bool {
+        self.inner.configured.iter().any(|r| r == path)
+    }
+
+    /// Adds a media folder (saved in the database), then indexes it in the background.
+    pub async fn add_root(&self, path: &str) -> Result<(), RootError> {
+        let path = normalise_root(path)?;
+        let meta = std::fs::metadata(&path).map_err(|_| {
+            RootError::Invalid(format!(
+                "{} doesn't exist in the container.",
+                path.display()
+            ))
+        })?;
+        if !meta.is_dir() {
+            return Err(RootError::Invalid(format!(
+                "{} isn't a directory.",
+                path.display()
+            )));
+        }
+        let _guard = self.inner.scan_lock.lock().await;
+        for (_, root) in self.roots() {
+            if path.starts_with(&root) || root.starts_with(&path) {
+                return Err(RootError::Invalid(if path == root {
+                    format!("{} is already in the library.", path.display())
+                } else {
+                    format!(
+                        "{} overlaps {}, which is already in the library.",
+                        path.display(),
+                        root.display()
+                    )
+                }));
+            }
+        }
+        let mut extra = load_extra_roots(&self.inner.db)?;
+        extra.push(path.clone());
+        self.apply_roots(&extra)?;
+        if let Some(watcher) = self.inner.watcher.lock().unwrap().as_mut() {
+            watch_root(watcher, &path);
+        }
+        tracing::info!(root = %path.display(), "media folder added");
+        drop(_guard);
+
+        let this = self.clone();
+        tokio::spawn(async move { this.full_scan().await });
+        Ok(())
+    }
+
+    /// Removes a media folder added in the web UI, and everything indexed from it.
+    /// The files themselves are untouched.
+    pub async fn remove_root(&self, path: &str) -> Result<(), RootError> {
+        let path = normalise_root(path)?;
+        if self.is_configured(&path) {
+            return Err(RootError::Invalid(format!(
+                "{} is set in the server configuration (PIXELGROVE_MEDIA_ROOTS), so it can only be removed there.",
+                path.display()
+            )));
+        }
+        let _guard = self.inner.scan_lock.lock().await;
+        let mut extra = load_extra_roots(&self.inner.db)?;
+        let before = extra.len();
+        extra.retain(|r| *r != path);
+        if extra.len() == before {
+            return Err(RootError::Invalid(format!(
+                "{} isn't in the library.",
+                path.display()
+            )));
+        }
+        if let Some(watcher) = self.inner.watcher.lock().unwrap().as_mut() {
+            let _ = watcher.unwatch(&path);
+        }
+        self.apply_roots(&extra)?;
+        tracing::info!(root = %path.display(), "media folder removed");
+        Ok(())
+    }
+
+    /// Saves the added roots and brings the database and root list in line.
+    fn apply_roots(&self, extra: &[PathBuf]) -> Result<()> {
+        let list: Vec<String> = extra
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        self.inner.db.conn()?.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            [EXTRA_ROOTS_KEY, &serde_json::to_string(&list)?],
+        )?;
+        let roots = scanner::sync_roots(&self.inner.db, &all_roots(&self.inner.configured, extra))?;
+        *self.inner.roots.write().unwrap() = roots;
+        Ok(())
     }
 
     /// Maps changed paths to the minimal set of directories to rescan.
     fn scan_targets(&self, paths: Vec<PathBuf>) -> Vec<(i64, PathBuf, PathBuf)> {
+        let roots = self.roots();
         let mut dirs = BTreeSet::new();
         for path in paths {
-            let Some((_, root)) = self.inner.roots.iter().find(|(_, r)| path.starts_with(r)) else {
+            let Some((_, root)) = roots.iter().find(|(_, r)| path.starts_with(r)) else {
                 continue;
             };
             let relative = path.strip_prefix(root).unwrap_or(&path);
@@ -226,11 +335,79 @@ impl Indexer {
         targets
             .into_iter()
             .filter_map(|dir| {
-                let (id, root) = self.inner.roots.iter().find(|(_, r)| dir.starts_with(r))?;
+                let (id, root) = roots.iter().find(|(_, r)| dir.starts_with(r))?;
                 Some((*id, root.clone(), dir))
             })
             .collect()
     }
+}
+
+fn watch_root(watcher: &mut Watcher, root: &Path) -> bool {
+    match watcher.watch(root, RecursiveMode::Recursive) {
+        Ok(()) => true,
+        Err(err) => {
+            tracing::warn!(
+                root = %root.display(),
+                %err,
+                "cannot watch root; changes will be picked up by periodic rescans"
+            );
+            false
+        }
+    }
+}
+
+/// Media folders added in the web UI.
+pub fn load_extra_roots(db: &Db) -> Result<Vec<PathBuf>> {
+    let value: Option<String> = rusqlite::OptionalExtension::optional(db.conn()?.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        [EXTRA_ROOTS_KEY],
+        |r| r.get(0),
+    ))?;
+    let list: Vec<String> = match value {
+        Some(json) => serde_json::from_str(&json).context("reading added media folders")?,
+        None => Vec::new(),
+    };
+    Ok(list.into_iter().map(PathBuf::from).collect())
+}
+
+/// Configured roots first, then added ones not already among them.
+fn all_roots(configured: &[PathBuf], extra: &[PathBuf]) -> Vec<PathBuf> {
+    let mut all = configured.to_vec();
+    for path in extra {
+        if !all.contains(path) {
+            all.push(path.clone());
+        }
+    }
+    all
+}
+
+/// An absolute path without `..` or a trailing slash.
+fn normalise_root(path: &str) -> Result<PathBuf, RootError> {
+    let trimmed = path.trim();
+    let trimmed = if trimmed.len() > 1 {
+        trimmed.trim_end_matches('/')
+    } else {
+        trimmed
+    };
+    let path = Path::new(trimmed);
+    if !path.is_absolute()
+        || path.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )
+        })
+    {
+        return Err(RootError::Invalid(
+            "Enter a full path, such as /photos.".into(),
+        ));
+    }
+    if path == Path::new("/") {
+        return Err(RootError::Invalid(
+            "The whole filesystem can't be added; pick a folder.".into(),
+        ));
+    }
+    Ok(path.to_path_buf())
 }
 
 fn unix_now() -> i64 {

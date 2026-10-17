@@ -87,6 +87,9 @@ the original. Browse API calls take 1–4 ms at 100k files.
 
 ### Scanning
 - Watch directories default to `/media/*`; any other path can be added in Settings.
+  As built (M8): folders added under **Settings → Media folders** (with a directory
+  browser) are stored in the database and start indexing immediately; those from the
+  configuration can't be removed there. Folders that overlap an existing one are refused.
 - Live filesystem watching (`notify`) **plus** a periodic full rescan (default every 6 h; important for NFS/SMB where watching is unreliable).
 - Incremental: files are only re-read when path, size or mtime change.
 - Hidden folders skipped; configurable exclude patterns (defaults include `@eaDir`, `.thumbnails`,
@@ -96,6 +99,11 @@ the original. Browse API calls take 1–4 ms at 100k files.
 - Zoom button, mouse-wheel zoom, pinch-zoom and swipe on mobile, keyboard navigation.
 - Actions: copy to clipboard (converted to PNG), download, share, info/metadata panel, favorite.
 - Slideshow from a photo or a folder: configurable interval, shuffle, include subfolders, include videos.
+  As built (M8): full screen with a cross-fade, the next photo decoded before it's shown,
+  the screen kept awake; videos play to the end. It pages through the folder (or the
+  whole subtree, newest first) as it goes, so a slideshow of the entire library starts
+  instantly; shuffle draws from everything loaded so far while loading the rest in the
+  background, without repeats until all have been shown. Also on shared folder links.
 
 ### UI
 - Dark mode by default, light mode available (and "follow system").
@@ -161,6 +169,23 @@ A synthetic library can be generated with `scripts/gen-bench-library.py`.
 | Memory, idle after scans | ~45 MB (17 MB with the Docker image's allocator settings) |
 | Memory, peak during first scan | ~145 MB |
 
+**Final pass (M8, same library and VM, release build, best of 5 requests):**
+
+| Metric | Result | Target |
+|---|---|---|
+| Initial scan | 5.6 s | < 5 min |
+| No-change rescan | 0.4 s | < 30 s |
+| Albums / folder / folder media / timeline page | 1–2 ms | < 50 ms |
+| Search (one word / two words) | 14 / 29 ms | < 100 ms |
+| Slideshow of the whole library (first page / page at 90k) | 44 / 118 ms | — |
+| Timeline months, Explore, Map points | 50 / 147 / 11 ms | — |
+| Thumbnail (12 MP JPEG, uncached) | 20–30 ms (2 ms for the small bench files) | — |
+| Memory, idle after restart + rescan | 21–23 MB | < 50 MB + cache |
+| Memory, after exercising every API (warm SQLite caches) | ~50 MB | — |
+| Memory, peak during first scan | 110 MB | — |
+| `/config` (database) | 25 MB | tens of MB |
+| Docker image | ~14 MB (the static binary alone, on `scratch`) | < 30 MB |
+
 ---
 
 ## 3. Milestones
@@ -176,4 +201,4 @@ A synthetic library can be generated with `scripts/gen-bench-library.py`.
 | M6 ✅ | **Sharing** | Share links for files/folders, public share pages, Sharing management view |
 | M7 ✅ | **Map & Explore** | Offline reverse geocoding, map with clustering, Explore facets |
 | M7+ ✅ | **Installable app (PWA)** | Manifest, icons (incl. maskable / Apple), service worker caching the app shell (never photos or API data) |
-| M8 | **Slideshow & polish** | Slideshow, mobile/desktop polish, 100k-file benchmark pass, docs (README, docker-compose example) |
+| M8 ✅ | **Slideshow & polish** | Slideshow, mobile/desktop polish, 100k-file benchmark pass, docs (README, docker-compose example) |

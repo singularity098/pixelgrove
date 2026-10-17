@@ -2,16 +2,68 @@
 
 An ultra-light, fast, self-hosted photo and video library written in Rust.
 
-> **Status:** early development (milestone M7 — map, explore and installable app). See
+- Browse folders the way Android does, plus a timeline, search, map, explore, favorites,
+  trash and a File View of the real folder tree.
+- Previews are made on the fly and kept only in memory: nothing is written next to your
+  photos, and `/config` holds just a small database (about 20 MB for 100k files).
+- Share a photo or folder with a link that needs no account.
+- Slideshows, dark and light themes, works on phones and installs as an app.
+- One small static binary in a `scratch` Docker image, for `linux/amd64` and `linux/arm64`.
+
+> **Status:** all v1 milestones (M0–M8) are complete. See
 > [docs/requirements.md](docs/requirements.md) and [docs/plan.md](docs/plan.md).
 
 ## Running with Docker
 
-See [docker-compose.example.yml](docker-compose.example.yml). Mount your libraries under
-`/media` and a small directory at `/config`, then open `http://<host>:8080`.
+Copy [docker-compose.example.yml](docker-compose.example.yml) to `docker-compose.yml`,
+point the volumes at your photos, then:
+
+```sh
+docker compose up -d
+```
+
+and open `http://<host>:8080`. Mount your libraries under `/media` and a small directory
+at `/config` (database and optional config file). The first scan of ~14k photos takes
+seconds on an SSD; on a NAS it's bounded by how fast the disks can read file headers.
+Browsing works while it runs.
+
+Without Compose:
+
+```sh
+docker run -d --name pixelgrove -p 8080:8080 --user 1000:1000 \
+  -v ./pixelgrove-config:/config -v /path/to/photos:/media/photos \
+  ghcr.io/singularity098/pixelgrove:edge
+```
 
 Images are published to `ghcr.io/singularity098/pixelgrove`: `edge` tracks `main`,
 and version tags (`1.2.3`, `1.2`, `latest`) are created from `v*` git tags.
+
+### Media folders
+
+Every directory under `/media` is indexed (set `PIXELGROVE_MEDIA_ROOTS` to change that).
+Admins can add other folders under **Settings → Media folders**, with a folder browser;
+they just need to be mounted into the container. Folders added there can be removed
+again (only from PixelGrove: the files are never touched). Settings also shows library
+counts and the last scan, and has **Rescan now**.
+
+PixelGrove watches folders for changes and also rescans everything every 6 hours, since
+change notifications don't work on network shares (NFS/SMB). Hidden folders and
+`@eaDir`, `#recycle`, `#snapshot` and `lost+found` are skipped; symlinks are not followed.
+If a mounted folder goes missing or empty (say a NAS share isn't mounted yet), its
+index is kept rather than wiped.
+
+### Behind a reverse proxy
+
+Put PixelGrove behind a proxy with HTTPS (Caddy, Traefik, nginx…) and set
+`PIXELGROVE_PUBLIC_URL` to its address. HTTPS is needed for copying photos to the
+clipboard and for installing the app; sign-in cookies are marked `Secure` automatically
+when the proxy sends `X-Forwarded-Proto: https`. For example, with Caddy:
+
+```
+photos.example.com {
+    reverse_proxy pixelgrove:8080
+}
+```
 
 ## Accounts
 
@@ -44,6 +96,16 @@ account. Links can expire, need a password, and allow or block downloads (with
 downloads off, photos are shown as previews only and videos still play). Folder links
 show items added later. Manage links under **Sharing**; admins see everyone's. Set
 `PIXELGROVE_PUBLIC_URL` so links use your public address.
+
+## Slideshow
+
+Start a slideshow from any folder (**Slideshow** next to the folder name, also on shared
+folder links) or from the photo you're viewing (it starts there). Its settings button
+picks how long each photo shows (3 s to 1 min), shuffle, whether videos play (to the
+end, then it moves on) and whether photos in subfolders are included. The choices are
+remembered in the browser. Keys: space pauses, ← → step, Esc ends (and the viewer then
+shows the last photo). On phones, swipe to step and tap to show the controls. It goes
+full screen where the browser allows and keeps the screen awake.
 
 ## Map and Explore
 

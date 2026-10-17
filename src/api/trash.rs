@@ -40,9 +40,8 @@ pub async fn trash_media(
     let (root_id, root) = state
         .indexer
         .roots()
-        .iter()
+        .into_iter()
         .find(|(_, root)| original.starts_with(root))
-        .cloned()
         .ok_or_else(|| ApiError::status(StatusCode::NOT_FOUND, "Not found."))?;
     let moved_from = original.clone();
     let result = state
@@ -170,7 +169,7 @@ pub async fn list(
         .into_iter()
         .skip(offset as usize)
         .take(limit as usize)
-        .map(|item| TrashEntry::new(item, roots))
+        .map(|item| TrashEntry::new(item, &roots))
         .collect();
     Ok(Json(Paged { items, total }))
 }

@@ -14,6 +14,7 @@
   import Sharing from './pages/Sharing.svelte';
   import Timeline from './pages/Timeline.svelte';
   import Setup from './pages/Setup.svelte';
+  import Settings from './pages/Settings.svelte';
   import Users from './pages/Users.svelte';
   import { route } from './lib/router.svelte';
   import { loadSession, session } from './lib/session.svelte';
@@ -59,6 +60,8 @@
       {/key}
     {:else if route.path === '/users' && user.role === 'admin'}
       <Users me={user} />
+    {:else if route.path === '/settings' && user.role === 'admin'}
+      <Settings />
     {:else if route.path === '/account'}
       <Account {user} />
     {:else if route.path === '/explore'}

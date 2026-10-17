@@ -9,6 +9,7 @@ mod library;
 mod media;
 mod public;
 mod search;
+mod settings;
 mod shares;
 mod timeline;
 mod trash;
@@ -44,6 +45,14 @@ pub fn router() -> Router<AppState> {
         .route("/users", get(users::list).post(users::create))
         .route("/users/{id}", patch(users::update).delete(users::delete))
         .route("/library/status", get(library::status))
+        .route("/library/rescan", post(settings::rescan))
+        .route(
+            "/settings/roots",
+            get(settings::roots)
+                .post(settings::add_root)
+                .delete(settings::remove_root),
+        )
+        .route("/settings/directories", get(settings::directories))
         .route("/albums", get(browse::albums))
         .route("/folders/filter", get(search::filter_folders))
         .route("/folders/{id}", get(browse::folder))
@@ -278,6 +287,10 @@ pub mod test_support {
                 media,
                 db,
             }
+        }
+
+        pub fn db(&self) -> &Db {
+            &self.db
         }
 
         pub fn media_root(&self) -> &std::path::Path {

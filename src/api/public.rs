@@ -11,7 +11,9 @@ use axum_extra::extract::cookie::{Cookie, SameSite};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use super::browse::{MEDIA_ITEM_COLUMNS, MediaItem, Paged, Subfolder, load_folder, subfolders_of};
+use super::browse::{
+    MEDIA_ITEM_COLUMNS, MediaItem, Paged, Subfolder, load_folder, media_page, subfolders_of,
+};
 use super::media::{FileRef, MediaRow, Versioned, file_response, load, preview_response};
 use super::{ApiError, ApiResult, is_https};
 use crate::server::AppState;
@@ -189,6 +191,9 @@ pub struct FolderQuery {
     offset: i64,
     #[serde(default = "default_limit")]
     limit: i64,
+    /// Also include everything in subfolders (for slideshows).
+    #[serde(default)]
+    recursive: bool,
 }
 
 fn default_limit() -> i64 {
@@ -250,21 +255,14 @@ pub async fn folder(
             } else {
                 Vec::new()
             };
-            let items = conn
-                .prepare(&format!(
-                    "SELECT {MEDIA_ITEM_COLUMNS} FROM media m WHERE m.folder_id = ?1
-                     ORDER BY m.taken_at DESC, m.id DESC LIMIT ?2 OFFSET ?3"
-                ))?
-                .query_map([folder.id, limit, offset], MediaItem::from_row)?
-                .collect::<rusqlite::Result<_>>()?;
+            // Everything below the shared folder is in the share.
+            let recursive = query.recursive.then(|| ("1".to_string(), Vec::new()));
+            let media = media_page(conn, &folder, recursive, offset, limit)?;
             Ok(Some(SharedFolder {
                 name: folder.name,
                 path: display_path,
                 subfolders,
-                media: Paged {
-                    items,
-                    total: folder.media_count,
-                },
+                media,
             }))
         })
         .await?
@@ -450,6 +448,20 @@ mod tests {
             )
             .await;
         assert_eq!(day2.body["media"]["items"][0]["name"], "b.jpg");
+        // Slideshows can include everything below the shared folder, and nothing else.
+        let everything = app
+            .send(
+                "GET",
+                &format!("/api/s/{token}/folder?recursive=true"),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(everything.body["media"]["total"], 2);
+        assert_eq!(
+            everything.body["media"]["items"].as_array().unwrap().len(),
+            2
+        );
 
         // Nothing outside the shared folder.
         let escape = app

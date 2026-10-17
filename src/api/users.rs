@@ -29,8 +29,8 @@ pub async fn create(
 ) -> ApiResult<(StatusCode, Json<User>)> {
     let username = auth::clean_username(&body.username).map_err(ApiError::bad_request)?;
     auth::check_password(&body.password).map_err(ApiError::bad_request)?;
-    let folders = auth::clean_folders(&body.folders, &state.config.media_roots)
-        .map_err(ApiError::bad_request)?;
+    let folders =
+        auth::clean_folders(&body.folders, &root_paths(&state)).map_err(ApiError::bad_request)?;
     let user = state
         .db
         .run(move |conn| {
@@ -64,10 +64,8 @@ pub async fn update(
         auth::check_password(password).map_err(ApiError::bad_request)?;
     }
     if let Some(folders) = &changes.folders {
-        changes.folders = Some(
-            auth::clean_folders(folders, &state.config.media_roots)
-                .map_err(ApiError::bad_request)?,
-        );
+        changes.folders =
+            Some(auth::clean_folders(folders, &root_paths(&state)).map_err(ApiError::bad_request)?);
     }
     let result = state
         .db
@@ -100,6 +98,11 @@ fn update_error(err: UpdateError) -> ApiError {
             ApiError::bad_request("There must be at least one enabled admin.")
         }
     }
+}
+
+/// Every media root, for checking folder limits.
+fn root_paths(state: &AppState) -> Vec<std::path::PathBuf> {
+    state.indexer.roots().into_iter().map(|(_, r)| r).collect()
 }
 
 #[cfg(test)]

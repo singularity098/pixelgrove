@@ -62,12 +62,8 @@ pub async fn storage(
     State(state): State<AppState>,
     _: CurrentUser,
 ) -> ApiResult<Json<Vec<Volume>>> {
-    let roots: Vec<std::path::PathBuf> = state
-        .indexer
-        .roots()
-        .iter()
-        .map(|(_, r)| r.clone())
-        .collect();
+    let roots: Vec<std::path::PathBuf> =
+        state.indexer.roots().into_iter().map(|(_, r)| r).collect();
     let volumes = tokio::task::spawn_blocking(move || {
         let mut volumes: Vec<(u64, Volume)> = Vec::new();
         for root in roots {

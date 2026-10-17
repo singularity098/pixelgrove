@@ -1,6 +1,7 @@
 services:
   pixelgrove:
-    image: ghcr.io/singularity098/pixelgrove:latest
+    # `edge` follows the main branch; pin a version (e.g. :1.0) once releases are tagged.
+    image: ghcr.io/singularity098/pixelgrove:edge
     container_name: pixelgrove
     # Run as the user that owns your media (needed for Trash, which moves files).
     user: "1000:1000"
@@ -11,6 +12,8 @@ services:
       # Mount libraries as subdirectories of /media. Add `:ro` for read-only (disables Trash).
       - /path/to/photos:/media/photos
       - /path/to/videos:/media/videos:ro
+      # Folders mounted elsewhere can be added under Settings → Media folders.
+      # - /mnt/archive:/archive:ro
     environment:
       # Externally reachable URL, used to build share links.
       # PIXELGROVE_PUBLIC_URL: https://photos.example.com
@@ -18,4 +21,7 @@ services:
       # PIXELGROVE_ADMIN_USER: admin
       # PIXELGROVE_ADMIN_PASSWORD: change-me-please
       TZ: Etc/UTC
+    # Optional: cap memory. Idle use is ~20 MB plus the preview cache (256 MB by default,
+    # PIXELGROVE_PREVIEW_CACHE_MB).
+    # mem_limit: 512m
     restart: unless-stopped
