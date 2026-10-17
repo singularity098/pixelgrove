@@ -40,13 +40,38 @@ export interface MediaItem {
   height: number | null;
   taken_at: number;
   duration_ms: number | null;
+  size: number;
   v: number;
+}
+
+/** Anything the viewer can page through. */
+export interface MediaSource {
+  readonly items: MediaItem[];
+  readonly total: number | null;
+  more(): Promise<boolean>;
+}
+
+export interface FolderHit {
+  id: number;
+  name: string;
+  path: string;
+  count: number;
+  cover: Cover | null;
+}
+
+export interface TreeFolder {
+  id: number;
+  name: string;
+  path: string;
+  media_count: number;
+  total_count: number;
+  subfolder_count: number;
+  latest_taken_at: number | null;
 }
 
 export interface MediaDetail extends MediaItem {
   folder_id: number;
   path: string;
-  size: number;
   modified_at: number;
   tz_offset: number | null;
   camera_make: string | null;

@@ -33,7 +33,7 @@ pub fn scope(user: &User, column: &str) -> (String, Vec<String>) {
 }
 
 /// The same subtree condition, for one folder.
-fn subtree(column: &str, path: &str) -> (String, Vec<String>) {
+pub(super) fn subtree(column: &str, path: &str) -> (String, Vec<String>) {
     (
         format!("({column} = ? OR ({column} >= ? AND {column} < ?))"),
         vec![path.to_string(), format!("{path}/"), format!("{path}0")],
@@ -61,9 +61,9 @@ pub struct Album {
 #[derive(Deserialize)]
 pub struct Page {
     #[serde(default)]
-    offset: i64,
+    pub offset: i64,
     #[serde(default = "default_limit")]
-    limit: i64,
+    pub limit: i64,
 }
 
 fn default_limit() -> i64 {
@@ -71,15 +71,15 @@ fn default_limit() -> i64 {
 }
 
 impl Page {
-    fn clamped(&self) -> (i64, i64) {
+    pub fn clamped(&self) -> (i64, i64) {
         (self.offset.max(0), self.limit.clamp(1, 500))
     }
 }
 
 #[derive(Serialize)]
 pub struct Paged<T> {
-    items: Vec<T>,
-    total: i64,
+    pub items: Vec<T>,
+    pub total: i64,
 }
 
 /// The default Photos view: every folder that directly contains media, newest first.
@@ -131,7 +131,7 @@ pub async fn albums(
     Ok(Json(result))
 }
 
-fn cover(row: &Row, first: usize) -> rusqlite::Result<Option<Cover>> {
+pub(super) fn cover(row: &Row, first: usize) -> rusqlite::Result<Option<Cover>> {
     Ok(match row.get::<_, Option<i64>>(first)? {
         Some(id) => Some(Cover {
             id,
@@ -143,7 +143,7 @@ fn cover(row: &Row, first: usize) -> rusqlite::Result<Option<Cover>> {
 }
 
 /// `path` relative to `root`, with the root itself shown by its directory name.
-fn relative(path: &str, root: &str) -> String {
+pub(super) fn relative(path: &str, root: &str) -> String {
     match Path::new(path).strip_prefix(root) {
         Ok(rel) if rel.as_os_str().is_empty() => root_name(root),
         Ok(rel) => rel.to_string_lossy().into_owned(),
@@ -306,7 +306,7 @@ fn folder_detail(conn: &Connection, user: &User, id: i64) -> ApiResult<FolderDet
     })
 }
 
-fn display_name(folder: &FolderRow) -> String {
+pub(super) fn display_name(folder: &FolderRow) -> String {
     if folder.path == folder.root {
         root_name(&folder.root)
     } else {
@@ -324,6 +324,7 @@ pub struct MediaItem {
     height: Option<u32>,
     taken_at: i64,
     duration_ms: Option<i64>,
+    size: i64,
     /// Changes whenever the file does; used to version preview URLs.
     v: i64,
 }
@@ -346,13 +347,13 @@ impl MediaItem {
             taken_at: r.get(6)?,
             duration_ms: r.get(7)?,
             v: r.get(8)?,
+            size: r.get(9)?,
         })
     }
 }
 
 /// Columns read by [`MediaItem::from_row`], for a `media` table aliased `m`.
-pub(super) const MEDIA_ITEM_COLUMNS: &str =
-    "m.id, m.name, m.kind, m.width, m.height, m.orientation, m.taken_at, m.duration_ms, m.mtime";
+pub(super) const MEDIA_ITEM_COLUMNS: &str = "m.id, m.name, m.kind, m.width, m.height, m.orientation, m.taken_at, m.duration_ms, m.mtime, m.size";
 
 pub async fn folder_media(
     State(state): State<AppState>,

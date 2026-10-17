@@ -4,7 +4,10 @@
   import ComingSoon from './pages/ComingSoon.svelte';
   import Folder from './pages/Folder.svelte';
   import Login from './pages/Login.svelte';
+  import Files from './pages/Files.svelte';
   import Photos from './pages/Photos.svelte';
+  import Search from './pages/Search.svelte';
+  import Timeline from './pages/Timeline.svelte';
   import Setup from './pages/Setup.svelte';
   import Users from './pages/Users.svelte';
   import { route } from './lib/router.svelte';
@@ -13,8 +16,6 @@
   loadSession();
 
   const upcoming: Record<string, [string, string]> = {
-    '/timeline': ['Timeline', 'M4'],
-    '/files': ['File View', 'M4'],
     '/favorites': ['Favorites', 'M5'],
     '/trash': ['Trash', 'M5'],
     '/sharing': ['Sharing', 'M6'],
@@ -23,6 +24,8 @@
   };
 
   const folderId = $derived(Number(/^\/folder\/(\d+)$/.exec(route.path)?.[1]) || null);
+  const filesMatch = $derived(/^\/files(?:\/(\d+))?$/.exec(route.path));
+  const searchQuery = $derived(route.path === '/search' ? (route.query.get('q') ?? '').trim() : '');
 </script>
 
 {#if session.current.status === 'setup'}
@@ -35,6 +38,16 @@
     {#if folderId !== null}
       {#key folderId}
         <Folder id={folderId} />
+      {/key}
+    {:else if filesMatch}
+      {#key filesMatch[1]}
+        <Files id={filesMatch[1] ? Number(filesMatch[1]) : null} />
+      {/key}
+    {:else if route.path === '/timeline'}
+      <Timeline />
+    {:else if searchQuery}
+      {#key searchQuery}
+        <Search query={searchQuery} />
       {/key}
     {:else if route.path === '/users' && user.role === 'admin'}
       <Users me={user} />

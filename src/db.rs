@@ -89,6 +89,18 @@ CREATE TABLE user_folders (
     PRIMARY KEY (user_id, path)
 ) WITHOUT ROWID;
 "#,
+    r#"
+-- What search matches against, built at scan time (see scanner::search_text) so a
+-- search is one pass over a single column.
+ALTER TABLE media ADD COLUMN search_text TEXT NOT NULL DEFAULT '';
+UPDATE media SET search_text = lower(
+    name || ' ' ||
+    coalesce((SELECT substr(f.path, length(r.path) + 2) FROM folders f
+              JOIN roots r ON r.id = f.root_id WHERE f.id = media.folder_id), '') || ' ' ||
+    coalesce(camera_make, '') || ' ' || coalesce(camera_model, '') || ' ' ||
+    coalesce(lens, '') || ' ' || coalesce(description, '') || ' ' ||
+    strftime('%Y-%m-%d', taken_at, 'unixepoch'));
+"#,
 ];
 
 #[derive(Clone)]

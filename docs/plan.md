@@ -54,7 +54,11 @@ the original. Browse API calls take 1–4 ms at 100k files.
 ### Search
 - Case-insensitive substring match over folder names, file names and metadata
   (camera, lens, date, place name, embedded description/keywords).
+- Multiple words must all match (in any of those places). `%` and `_` are literal.
 - Place names come from a **bundled offline reverse-geocoding dataset** (cities, ~10–30 MB) — no external calls.
+- As built (M4): each item's searchable text is stored lower-cased at scan time, so a search
+  is one pass over one column: 20–90 ms at 100k files, with no separate full-text index
+  (which would have roughly doubled the database).
 
 ### Changing files
 - **Trash:** deleting moves the file to `<watch root>/.pixelgrove-trash/<relative path>`;
@@ -153,7 +157,7 @@ A synthetic library can be generated with `scripts/gen-bench-library.py`.
 |---|---|
 | Initial scan | 3.8–4.6 s (real photos on spinning disks/NAS will be I/O-bound and slower) |
 | No-change rescan | 0.4–0.6 s |
-| Database size | 14 MB |
+| Database size | 14 MB (21 MB from M4, with stored search text) |
 | Memory, idle after scans | ~45 MB (17 MB with the Docker image's allocator settings) |
 | Memory, peak during first scan | ~145 MB |
 
@@ -167,7 +171,7 @@ A synthetic library can be generated with `scripts/gen-bench-library.py`.
 | M1 ✅ | **Indexer** | SQLite schema + migrations, parallel scanner, EXIF/video metadata, folder aggregates, watcher, periodic rescan, exclusions |
 | M2 ✅ | **Auth & users** | First-run setup, login, sessions, roles, folder restrictions, user management |
 | M3 ✅ | **Core browsing** | App shell + sidebar, dark/light theme, Photos (folders) view, folder view, preview pipeline, photo/video viewer (zoom, wheel, swipe, download, clipboard, info) |
-| M4 | **Timeline, File View, Search** | Timeline with scrubber, File View tree + filter, global search |
+| M4 ✅ | **Timeline, File View, Search** | Timeline with scrubber, File View tree + filter, global search |
 | M5 | **Favorites, Trash, Storage** | Per-user favorites, trash with restore/purge, storage display |
 | M6 | **Sharing** | Share links for files/folders, public share pages, Sharing management view |
 | M7 | **Map & Explore** | Offline reverse geocoding, map with clustering, Explore facets |

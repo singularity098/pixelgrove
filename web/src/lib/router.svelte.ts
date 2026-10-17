@@ -7,10 +7,10 @@ window.addEventListener('popstate', () => {
 });
 
 /** Navigates to `url` (path plus optional `?query`). `replace` avoids a history entry. */
-export function navigate(url: string, replace = false): void {
+export function navigate(url: string, replace = false, state: unknown = null): void {
   const target = new URL(url, location.origin);
   if (target.pathname + target.search === location.pathname + location.search) return;
-  history[replace ? 'replaceState' : 'pushState'](null, '', target.pathname + target.search);
+  history[replace ? 'replaceState' : 'pushState'](state, '', target.pathname + target.search);
   route.path = target.pathname;
   route.query = new URLSearchParams(target.search);
 }

@@ -181,7 +181,7 @@ pub fn scan(
             })
             .collect();
         let tx = conn.transaction()?;
-        upsert_media(&tx, chunk, &infos, &mut stats)?;
+        upsert_media(&tx, root, &fs_tree.dirs, chunk, &infos, &mut stats)?;
         tx.commit()?;
     }
 
@@ -410,6 +410,8 @@ fn apply_structure(
 /// Inserts or updates one chunk of media rows: `(file, folder id, already known)`.
 fn upsert_media(
     tx: &Transaction,
+    root: &Path,
+    dirs: &[String],
     files: &[(&FsFile, i64, bool)],
     infos: &[MediaInfo],
     stats: &mut ScanStats,
@@ -419,8 +421,9 @@ fn upsert_media(
         let mut upsert = tx.prepare(
             "INSERT INTO media (folder_id, name, kind, size, mtime, taken_at, tz_offset, width,
                  height, orientation, duration_ms, camera_make, camera_model, lens, latitude,
-                 longitude, description)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                 longitude, description, search_text)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                     ?18)
              ON CONFLICT (folder_id, name) DO UPDATE SET
                  kind = excluded.kind, size = excluded.size, mtime = excluded.mtime,
                  taken_at = excluded.taken_at, tz_offset = excluded.tz_offset,
@@ -428,16 +431,23 @@ fn upsert_media(
                  orientation = excluded.orientation, duration_ms = excluded.duration_ms,
                  camera_make = excluded.camera_make, camera_model = excluded.camera_model,
                  lens = excluded.lens, latitude = excluded.latitude,
-                 longitude = excluded.longitude, description = excluded.description",
+                 longitude = excluded.longitude, description = excluded.description,
+                 search_text = excluded.search_text",
         )?;
         for ((file, folder_id, known), info) in files.iter().zip(infos) {
+            let taken_at = info.taken_at.unwrap_or(file.mtime);
+            let folder = Path::new(&dirs[file.dir])
+                .strip_prefix(root)
+                .map(|p| p.to_string_lossy())
+                .unwrap_or_default();
+            let search = search_text(&file.name, &folder, info, taken_at);
             upsert.execute(params![
                 folder_id,
                 file.name,
                 file.kind.as_str(),
                 file.size,
                 file.mtime,
-                info.taken_at.unwrap_or(file.mtime),
+                taken_at,
                 info.tz_offset,
                 info.width,
                 info.height,
@@ -449,6 +459,7 @@ fn upsert_media(
                 info.latitude,
                 info.longitude,
                 info.description,
+                search,
             ])?;
             touched.insert(*folder_id);
             if *known {
@@ -459,6 +470,25 @@ fn upsert_media(
         }
     }
     update_aggregates(tx, &touched)
+}
+
+/// The lower-cased text that search matches against: file name, folder path below the
+/// root, camera, lens, description and the capture date as `YYYY-MM-DD`.
+pub fn search_text(name: &str, folder: &str, info: &MediaInfo, taken_at: i64) -> String {
+    let date = chrono::DateTime::from_timestamp(taken_at, 0)
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_default();
+    [
+        name,
+        folder,
+        info.camera_make.as_deref().unwrap_or(""),
+        info.camera_model.as_deref().unwrap_or(""),
+        info.lens.as_deref().unwrap_or(""),
+        info.description.as_deref().unwrap_or(""),
+        &date,
+    ]
+    .join(" ")
+    .to_lowercase()
 }
 
 /// Recomputes count / newest time / cover for the given folders.

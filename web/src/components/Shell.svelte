@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { User } from '../lib/api';
-  import { link, route } from '../lib/router.svelte';
+  import { link, navigate, route } from '../lib/router.svelte';
   import { signOut } from '../lib/session.svelte';
   import { currentTheme, setTheme, type Theme } from '../theme';
   import Icon, { type IconName } from './Icon.svelte';
@@ -53,6 +53,29 @@
     }
   }
 
+  let searchText = $state(route.path === '/search' ? (route.query.get('q') ?? '') : '');
+  let searchOpen = $state(false);
+  let searchInput: HTMLInputElement | undefined = $state();
+
+  // Keep the box in step with the URL: show the current query, clear it elsewhere.
+  $effect(() => {
+    searchText = route.path === '/search' ? (route.query.get('q') ?? '') : '';
+  });
+
+  function submitSearch(event: SubmitEvent) {
+    event.preventDefault();
+    const q = searchText.trim();
+    if (!q) return;
+    searchInput?.blur();
+    searchOpen = false;
+    navigate(`/search?q=${encodeURIComponent(q)}`);
+  }
+
+  function openSearch() {
+    searchOpen = true;
+    queueMicrotask(() => searchInput?.focus());
+  }
+
   function toggleTheme() {
     theme = theme === 'dark' ? 'light' : 'dark';
     setTheme(theme);
@@ -89,7 +112,18 @@
       <img src="/favicon.svg" alt="" width="26" height="26" />
       <span>PixelGrove</span>
     </a>
+    <form class="search" class:open={searchOpen} role="search" onsubmit={submitSearch}>
+      <Icon name="search" size={18} />
+      <input
+        bind:this={searchInput}
+        bind:value={searchText}
+        type="search"
+        placeholder="Search your library"
+        aria-label="Search your library"
+        onblur={() => (searchOpen = false)} />
+    </form>
     <div class="spacer"></div>
+    <button class="icon search-toggle" onclick={openSearch} aria-label="Search"><Icon name="search" /></button>
     <button class="icon" onclick={toggleTheme} aria-label="Switch to {theme === 'dark' ? 'light' : 'dark'} mode" title="Switch to {theme === 'dark' ? 'light' : 'dark'} mode">
       <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
     </button>
@@ -163,6 +197,55 @@
 
   .spacer {
     flex: 1;
+  }
+
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 1 560px;
+    margin-left: 24px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+  }
+
+  .search:focus-within {
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+
+  .search input {
+    margin: 0;
+    padding: 9px 0;
+    border: 0;
+    background: transparent;
+    outline: none;
+  }
+
+  .search-toggle {
+    display: none;
+  }
+
+  @media (max-width: 700px) {
+    .search {
+      display: none;
+      position: absolute;
+      inset: 8px 8px auto;
+      margin: 0;
+      z-index: 2;
+      background: var(--surface);
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+
+    .search.open {
+      display: flex;
+    }
+
+    .search-toggle {
+      display: grid;
+    }
   }
 
   .sidebar {

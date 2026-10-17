@@ -2,8 +2,11 @@
 
 mod auth;
 mod browse;
+mod files;
 mod library;
 mod media;
+mod search;
+mod timeline;
 mod users;
 
 use axum::extract::{FromRequestParts, Request};
@@ -37,11 +40,17 @@ pub fn router() -> Router<AppState> {
         .route("/users/{id}", patch(users::update).delete(users::delete))
         .route("/library/status", get(library::status))
         .route("/albums", get(browse::albums))
+        .route("/folders/filter", get(search::filter_folders))
         .route("/folders/{id}", get(browse::folder))
         .route("/folders/{id}/media", get(browse::folder_media))
         .route("/media/{id}", get(media::detail))
         .route("/media/{id}/preview/{variant}", get(media::preview))
         .route("/media/{id}/file", get(media::file))
+        .route("/search", get(search::search))
+        .route("/timeline", get(timeline::timeline))
+        .route("/timeline/months", get(timeline::months))
+        .route("/files", get(files::tops))
+        .route("/files/{id}", get(files::children))
         .fallback(not_found)
         .layer(middleware::from_fn(require_csrf_header))
 }

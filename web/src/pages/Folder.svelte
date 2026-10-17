@@ -1,49 +1,25 @@
 <script lang="ts">
   import MediaGrid from '../components/MediaGrid.svelte';
+  import MediaViewerHost from '../components/MediaViewerHost.svelte';
   import Thumb from '../components/Thumb.svelte';
-  import Viewer from '../components/Viewer.svelte';
   import { get } from '../lib/api';
   import { PagedList, type FolderDetail, type MediaItem } from '../lib/media.svelte';
-  import { link, navigate, onVisible, route } from '../lib/router.svelte';
+  import { openViewer } from '../lib/query';
+  import { link, onVisible } from '../lib/router.svelte';
 
   let { id }: { id: number } = $props();
 
   let folder: FolderDetail | null = $state(null);
   let error = $state('');
-  // Recreated whenever the folder changes.
-  const media = $derived(new PagedList<MediaItem>(`/folders/${id}/media`, 200));
+  // The page is keyed on the folder id, so this is created once per folder.
+  // svelte-ignore state_referenced_locally
+  const media = new PagedList<MediaItem>(`/folders/${id}/media`, 200);
 
   $effect(() => {
-    const folderId = id;
-    folder = null;
-    error = '';
-    get<FolderDetail>(`/folders/${folderId}`)
-      .then((f) => {
-        if (folderId === id) folder = f;
-      })
+    get<FolderDetail>(`/folders/${id}`)
+      .then((f) => (folder = f))
       .catch((e) => (error = (e as Error).message));
   });
-
-  // The open item is in the URL (?m=<media id>) so Back closes the viewer.
-  const openId = $derived(Number(route.query.get('m')) || null);
-  const openIndex = $derived(openId === null ? -1 : media.items.findIndex((m) => m.id === openId));
-
-  // Opened from a link to an item that isn't loaded yet: keep loading until it is.
-  $effect(() => {
-    if (openId !== null && openIndex < 0 && !media.done && !media.loading && !media.error) media.more();
-  });
-
-  function open(index: number) {
-    navigate(`/folder/${id}?m=${media.items[index].id}`);
-  }
-
-  function show(index: number) {
-    navigate(`/folder/${id}?m=${media.items[index].id}`, true);
-  }
-
-  function close() {
-    history.length > 1 ? history.back() : navigate(`/folder/${id}`, true);
-  }
 </script>
 
 <section class="page wide">
@@ -74,20 +50,12 @@
     {/if}
   {/if}
 
-  <MediaGrid items={media.items} onopen={open} />
+  <MediaGrid items={media.items} onopen={(i) => openViewer(media.items[i].id)} />
   {#if media.error}<p class="error">{media.error}</p>{/if}
   <div use:onVisible={() => media.more()}></div>
 </section>
 
-{#if openIndex >= 0}
-  <Viewer
-    items={media.items}
-    index={openIndex}
-    total={media.total ?? media.items.length}
-    onindex={show}
-    onclose={close}
-    onneedmore={() => media.more()} />
-{/if}
+<MediaViewerHost source={media} />
 
 <style>
   .crumbs {
