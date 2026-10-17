@@ -4,7 +4,9 @@
   import ComingSoon from './pages/ComingSoon.svelte';
   import Folder from './pages/Folder.svelte';
   import Login from './pages/Login.svelte';
+  import Favorites from './pages/Favorites.svelte';
   import Files from './pages/Files.svelte';
+  import Trash from './pages/Trash.svelte';
   import Photos from './pages/Photos.svelte';
   import Search from './pages/Search.svelte';
   import Timeline from './pages/Timeline.svelte';
@@ -16,8 +18,6 @@
   loadSession();
 
   const upcoming: Record<string, [string, string]> = {
-    '/favorites': ['Favorites', 'M5'],
-    '/trash': ['Trash', 'M5'],
     '/sharing': ['Sharing', 'M6'],
     '/map': ['Map', 'M7'],
     '/explore': ['Explore', 'M7'],
@@ -43,6 +43,10 @@
       {#key filesMatch[1]}
         <Files id={filesMatch[1] ? Number(filesMatch[1]) : null} />
       {/key}
+    {:else if route.path === '/favorites' && user.role !== 'viewer'}
+      <Favorites />
+    {:else if route.path === '/trash' && user.role !== 'viewer'}
+      <Trash />
     {:else if route.path === '/timeline'}
       <Timeline />
     {:else if searchQuery}

@@ -1262,6 +1262,7 @@ dependencies = [
  "rayon",
  "rusqlite",
  "rust-embed",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

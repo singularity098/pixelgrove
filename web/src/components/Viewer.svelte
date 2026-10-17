@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { get } from '../lib/api';
+  import { del, get, post, put } from '../lib/api';
+  import { session } from '../lib/session.svelte';
   import {
     downloadUrl,
     fileUrl,
@@ -19,6 +20,7 @@
     onindex,
     onclose,
     onneedmore,
+    onremoved,
   }: {
     items: MediaItem[];
     index: number;
@@ -26,7 +28,12 @@
     onindex: (index: number) => void;
     onclose: () => void;
     onneedmore: () => Promise<boolean>;
+    onremoved: (id: number) => void;
   } = $props();
+
+  const canEdit = $derived(
+    session.current.status === 'signed-in' && session.current.user.role !== 'viewer',
+  );
 
   const MAX_SCALE = 8;
   const item = $derived(items[index]);
@@ -54,14 +61,44 @@
     if (index >= items.length - 3 && items.length < total) onneedmore();
   });
 
+  // Details back the info panel and the favorite button.
   $effect(() => {
-    if (!showInfo) return;
     const id = item.id;
     detail = null;
     get<MediaDetail>(`/media/${id}`).then((d) => {
       if (d.id === item.id) detail = d;
     });
   });
+
+  async function toggleFavorite() {
+    if (!detail) return;
+    const d = detail;
+    const favorite = !d.favorite;
+    d.favorite = favorite;
+    try {
+      await (favorite ? put(`/media/${d.id}/favorite`) : del(`/media/${d.id}/favorite`));
+      flash(favorite ? 'Added to favorites' : 'Removed from favorites');
+    } catch (e) {
+      d.favorite = !favorite;
+      flash((e as Error).message);
+    }
+  }
+
+  let trashing = $state(false);
+  async function moveToTrash() {
+    if (trashing || !confirm(`Move “${item.name}” to the trash? You can restore it for 30 days.`)) return;
+    trashing = true;
+    const id = item.id;
+    try {
+      await post(`/media/${id}/trash`);
+      onremoved(id);
+      flash('Moved to trash');
+    } catch (e) {
+      flash((e as Error).message);
+    } finally {
+      trashing = false;
+    }
+  }
 
   $effect(() => {
     const previous = document.body.style.overflow;
@@ -217,6 +254,12 @@
       case 'i':
         showInfo = !showInfo;
         break;
+      case 'f':
+        if (canEdit) toggleFavorite();
+        break;
+      case 'Delete':
+        if (canEdit) moveToTrash();
+        break;
       default:
         return;
     }
@@ -267,8 +310,16 @@
       </button>
       <button class="icon" onclick={copyImage} aria-label="Copy to clipboard" title="Copy to clipboard"><Icon name="copy" /></button>
     {/if}
+    {#if canEdit}
+      <button class="icon" class:on={detail?.favorite} onclick={toggleFavorite} disabled={!detail} aria-pressed={detail?.favorite ?? false} aria-label={detail?.favorite ? 'Remove from favorites' : 'Add to favorites'} title={detail?.favorite ? 'Remove from favorites' : 'Add to favorites'}>
+        <Icon name={detail?.favorite ? 'heartFilled' : 'favorite'} />
+      </button>
+    {/if}
     <a class="icon-link" href={downloadUrl(item)} download={item.name} aria-label="Download" title="Download"><Icon name="download" /></a>
     <button class="icon" class:on={showInfo} onclick={() => (showInfo = !showInfo)} aria-label="Info" title="Info (i)"><Icon name="info" /></button>
+    {#if canEdit}
+      <button class="icon" onclick={moveToTrash} disabled={trashing} aria-label="Move to trash" title="Move to trash (Delete)"><Icon name="trash" /></button>
+    {/if}
   </div>
 
   <div class="body">
@@ -393,6 +444,10 @@
     border-radius: 999px;
     border: 0;
     background: transparent;
+  }
+
+  .toolbar button.icon[aria-pressed='true'] {
+    color: #ff6b81;
   }
 
   .toolbar button.icon:hover,

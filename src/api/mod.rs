@@ -2,11 +2,13 @@
 
 mod auth;
 mod browse;
+mod favorites;
 mod files;
 mod library;
 mod media;
 mod search;
 mod timeline;
+mod trash;
 mod users;
 
 use axum::extract::{FromRequestParts, Request};
@@ -46,6 +48,18 @@ pub fn router() -> Router<AppState> {
         .route("/media/{id}", get(media::detail))
         .route("/media/{id}/preview/{variant}", get(media::preview))
         .route("/media/{id}/file", get(media::file))
+        .route(
+            "/media/{id}/favorite",
+            axum::routing::put(favorites::add).delete(favorites::remove),
+        )
+        .route("/media/{id}/trash", post(trash::trash_media))
+        .route("/favorites", get(favorites::list))
+        .route("/trash", get(trash::list).delete(trash::empty))
+        .route("/trash/{id}", axum::routing::delete(trash::delete_forever))
+        .route("/trash/{id}/restore", post(trash::restore))
+        .route("/trash/{id}/preview/{variant}", get(trash::preview))
+        .route("/trash/{id}/file", get(trash::file))
+        .route("/storage", get(library::storage))
         .route("/search", get(search::search))
         .route("/timeline", get(timeline::timeline))
         .route("/timeline/months", get(timeline::months))

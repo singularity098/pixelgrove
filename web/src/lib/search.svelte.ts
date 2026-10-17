@@ -11,6 +11,13 @@ export class SearchResults implements MediaSource {
 
   constructor(private readonly query: string) {}
 
+  remove(id: number): void {
+    const index = this.items.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    this.items.splice(index, 1);
+    if (this.total !== null) this.total--;
+  }
+
   async more(): Promise<boolean> {
     if (this.loading || this.error || (this.total !== null && this.items.length >= this.total)) return false;
     this.loading = true;

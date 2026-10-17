@@ -17,30 +17,30 @@ use crate::auth::User;
 use crate::preview::{Key, Preview, Variant};
 use crate::server::AppState;
 
-struct MediaRow {
-    id: i64,
-    folder_id: i64,
-    folder_path: String,
-    name: String,
-    kind: String,
-    size: i64,
-    mtime: i64,
-    taken_at: i64,
-    tz_offset: Option<i32>,
-    width: Option<u32>,
-    height: Option<u32>,
-    orientation: Option<u16>,
-    duration_ms: Option<i64>,
-    camera_make: Option<String>,
-    camera_model: Option<String>,
-    lens: Option<String>,
-    latitude: Option<f64>,
-    longitude: Option<f64>,
-    description: Option<String>,
+pub(super) struct MediaRow {
+    pub id: i64,
+    pub folder_id: i64,
+    pub folder_path: String,
+    pub name: String,
+    pub kind: String,
+    pub size: i64,
+    pub mtime: i64,
+    pub taken_at: i64,
+    pub tz_offset: Option<i32>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub orientation: Option<u16>,
+    pub duration_ms: Option<i64>,
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub lens: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub description: Option<String>,
 }
 
 impl MediaRow {
-    fn path(&self) -> PathBuf {
+    pub fn path(&self) -> PathBuf {
         Path::new(&self.folder_path).join(&self.name)
     }
 }
@@ -80,7 +80,7 @@ fn load(conn: &Connection, id: i64) -> rusqlite::Result<Option<MediaRow>> {
 }
 
 /// Loads media the user may see, or 404s (also for media they may not see).
-async fn visible(state: &AppState, user: User, id: i64) -> ApiResult<MediaRow> {
+pub(super) async fn visible(state: &AppState, user: User, id: i64) -> ApiResult<MediaRow> {
     state
         .db
         .run(move |conn| load(conn, id).map_err(Into::into))
@@ -110,6 +110,8 @@ pub struct MediaDetail {
     latitude: Option<f64>,
     longitude: Option<f64>,
     description: Option<String>,
+    /// Whether the signed-in user has favorited it.
+    favorite: bool,
     v: i64,
 }
 
@@ -118,7 +120,12 @@ pub async fn detail(
     current: CurrentUser,
     UrlPath(id): UrlPath<i64>,
 ) -> ApiResult<Json<MediaDetail>> {
+    let user_id = current.user.id;
     let m = visible(&state, current.user, id).await?;
+    let favorite = state
+        .db
+        .run(move |conn| super::favorites::is_favorite(conn, user_id, id))
+        .await?;
     let (width, height) = if m.orientation.is_some_and(|o| o >= 5) {
         (m.height, m.width)
     } else {
@@ -143,6 +150,7 @@ pub async fn detail(
         latitude: m.latitude,
         longitude: m.longitude,
         description: m.description,
+        favorite,
         v: m.mtime,
     }))
 }
@@ -151,9 +159,9 @@ pub async fn detail(
 pub struct Versioned {
     /// The media's mtime as the client knew it; a match means the response can be
     /// cached forever (the URL changes when the file does).
-    v: Option<i64>,
+    pub v: Option<i64>,
     #[serde(default)]
-    download: bool,
+    pub download: bool,
 }
 
 fn cache_control(versioned: &Versioned, mtime: i64) -> HeaderValue {
@@ -164,34 +172,44 @@ fn cache_control(versioned: &Versioned, mtime: i64) -> HeaderValue {
     })
 }
 
-pub async fn preview(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    UrlPath((id, variant)): UrlPath<(i64, String)>,
-    Query(versioned): Query<Versioned>,
+/// A file to serve a preview or the original of (library media or a trashed item).
+pub(super) struct FileRef<'a> {
+    /// Identifies cached previews; trashed items use negative ids.
+    pub cache_id: i64,
+    pub path: &'a Path,
+    pub name: &'a str,
+    pub kind: &'a str,
+    pub mtime: i64,
+    pub size: i64,
+    pub orientation: Option<u16>,
+}
+
+pub(super) async fn preview_response(
+    state: &AppState,
+    file: FileRef<'_>,
+    variant: &str,
+    versioned: &Versioned,
     request: Request,
 ) -> ApiResult<Response> {
-    let variant = Variant::parse(&variant)
+    let variant = Variant::parse(variant)
         .ok_or_else(|| ApiError::status(StatusCode::NOT_FOUND, "Unknown preview size."))?;
-    let m = visible(&state, current.user, id).await?;
-    if m.kind != "image" {
+    if file.kind != "image" {
         return Err(ApiError::status(
             StatusCode::NOT_FOUND,
             "Videos have no preview image.",
         ));
     }
     let key = Key {
-        media_id: m.id,
+        media_id: file.cache_id,
         variant,
-        mtime: m.mtime,
-        size: m.size,
+        mtime: file.mtime,
+        size: file.size,
     };
-    let path = m.path();
-    let preview = match state.previews.get(key, &path, m.orientation).await {
+    let preview = match state.previews.get(key, file.path, file.orientation).await {
         Ok(preview) => preview,
         Err(err) => {
             // A corrupt or unusual file: let the browser try the original.
-            tracing::debug!(path = %path.display(), "preview failed, serving original: {err:#}");
+            tracing::debug!(path = %file.path.display(), "preview failed, serving original: {err:#}");
             Preview::Original
         }
     };
@@ -201,15 +219,60 @@ pub async fn preview(
             Body::from(bytes),
         )
             .into_response(),
-        Preview::Original => serve_file(&path, request).await?,
+        Preview::Original => serve_file(file.path, request).await?,
     };
     response
         .headers_mut()
-        .insert(header::CACHE_CONTROL, cache_control(&versioned, m.mtime));
+        .insert(header::CACHE_CONTROL, cache_control(versioned, file.mtime));
     Ok(response)
 }
 
 /// The original file, with HTTP range support (needed for video seeking).
+pub(super) async fn file_response(
+    file: FileRef<'_>,
+    versioned: &Versioned,
+    request: Request,
+) -> ApiResult<Response> {
+    let mut response = serve_file(file.path, request).await?;
+    let headers = response.headers_mut();
+    headers.insert(header::CACHE_CONTROL, cache_control(versioned, file.mtime));
+    if file.name.to_ascii_lowercase().ends_with(".mov") {
+        // Most .mov files are H.264/HEVC that browsers play fine, but only when labelled
+        // as MP4.
+        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("video/mp4"));
+    }
+    if versioned.download {
+        headers.insert(header::CONTENT_DISPOSITION, attachment(file.name));
+    }
+    Ok(response)
+}
+
+impl MediaRow {
+    fn file_ref<'a>(&'a self, path: &'a Path) -> FileRef<'a> {
+        FileRef {
+            cache_id: self.id,
+            path,
+            name: &self.name,
+            kind: &self.kind,
+            mtime: self.mtime,
+            size: self.size,
+            orientation: self.orientation,
+        }
+    }
+}
+
+pub async fn preview(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    UrlPath((id, variant)): UrlPath<(i64, String)>,
+    Query(versioned): Query<Versioned>,
+    request: Request,
+) -> ApiResult<Response> {
+    let m = visible(&state, current.user, id).await?;
+    let path = m.path();
+    preview_response(&state, m.file_ref(&path), &variant, &versioned, request).await
+}
+
 pub async fn file(
     State(state): State<AppState>,
     current: CurrentUser,
@@ -218,18 +281,8 @@ pub async fn file(
     request: Request,
 ) -> ApiResult<Response> {
     let m = visible(&state, current.user, id).await?;
-    let mut response = serve_file(&m.path(), request).await?;
-    let headers = response.headers_mut();
-    headers.insert(header::CACHE_CONTROL, cache_control(&versioned, m.mtime));
-    if m.name.to_ascii_lowercase().ends_with(".mov") {
-        // Most .mov files are H.264/HEVC that browsers play fine, but only when labelled
-        // as MP4.
-        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("video/mp4"));
-    }
-    if versioned.download {
-        headers.insert(header::CONTENT_DISPOSITION, attachment(&m.name));
-    }
-    Ok(response)
+    let path = m.path();
+    file_response(m.file_ref(&path), &versioned, request).await
 }
 
 async fn serve_file(path: &Path, request: Request) -> ApiResult<Response> {

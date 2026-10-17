@@ -101,6 +101,36 @@ UPDATE media SET search_text = lower(
     coalesce(lens, '') || ' ' || coalesce(description, '') || ' ' ||
     strftime('%Y-%m-%d', taken_at, 'unixepoch'));
 "#,
+    r#"
+CREATE TABLE favorites (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    media_id   INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, media_id)
+) WITHOUT ROWID;
+-- Needed so deleting media (e.g. a whole folder) doesn't scan favorites per row.
+CREATE INDEX favorites_media ON favorites(media_id);
+
+-- Items moved to the trash folder, with enough metadata to show and restore them.
+CREATE TABLE trash (
+    id            INTEGER PRIMARY KEY,
+    root_id       INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
+    original_path TEXT NOT NULL,
+    trash_path    TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    size          INTEGER NOT NULL,
+    mtime         INTEGER NOT NULL,
+    taken_at      INTEGER NOT NULL,
+    width         INTEGER,
+    height        INTEGER,
+    orientation   INTEGER,
+    duration_ms   INTEGER,
+    deleted_at    INTEGER NOT NULL,
+    deleted_by    INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX trash_deleted ON trash(deleted_at);
+"#,
 ];
 
 #[derive(Clone)]

@@ -5,6 +5,7 @@
   import { signOut } from '../lib/session.svelte';
   import { currentTheme, setTheme, type Theme } from '../theme';
   import Icon, { type IconName } from './Icon.svelte';
+  import Storage from './Storage.svelte';
 
   let { user, children }: { user: User; children: Snippet } = $props();
 
@@ -82,16 +83,18 @@
   }
 
   type Item = { href: string; label: string; icon: IconName };
-  const library: Item[] = [
+  // View-only accounts have no favorites, sharing or trash.
+  const editor = $derived(user.role !== 'viewer');
+  const library = $derived<Item[]>([
     { href: '/', label: 'Photos', icon: 'photos' },
     { href: '/timeline', label: 'Timeline', icon: 'timeline' },
     { href: '/explore', label: 'Explore', icon: 'explore' },
     { href: '/map', label: 'Map', icon: 'map' },
-    { href: '/sharing', label: 'Sharing', icon: 'sharing' },
-    { href: '/favorites', label: 'Favorites', icon: 'favorite' },
+    ...(editor ? [{ href: '/sharing', label: 'Sharing', icon: 'sharing' as IconName }] : []),
+    ...(editor ? [{ href: '/favorites', label: 'Favorites', icon: 'favorite' as IconName }] : []),
     { href: '/files', label: 'File View', icon: 'files' },
-    { href: '/trash', label: 'Trash', icon: 'trash' },
-  ];
+    ...(editor ? [{ href: '/trash', label: 'Trash', icon: 'trash' as IconName }] : []),
+  ]);
   const account = $derived<Item[]>([
     ...(user.role === 'admin' ? [{ href: '/users', label: 'Users', icon: 'users' as IconName }] : []),
     { href: '/account', label: 'Account', icon: 'account' },
@@ -147,6 +150,8 @@
         </li>
       {/each}
     </ul>
+    <div class="bottom">
+    <Storage />
     <ul class="secondary">
       {#each account as item (item.href)}
         <li>
@@ -157,6 +162,7 @@
         </li>
       {/each}
     </ul>
+    </div>
   </nav>
 
   <main>

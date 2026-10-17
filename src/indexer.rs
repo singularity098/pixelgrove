@@ -165,23 +165,33 @@ impl Indexer {
             while let Ok(path) = rx.try_recv() {
                 paths.push(path);
             }
-            let targets = self.scan_targets(paths);
-            if targets.is_empty() {
-                continue;
-            }
-            let _guard = self.inner.scan_lock.lock().await;
-            let inner = self.inner.clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                for (root_id, root, target) in targets {
-                    if let Err(err) =
-                        scanner::scan(&inner.db, root_id, &root, &target, &inner.excludes)
-                    {
-                        tracing::warn!(path = %target.display(), "scan failed: {err:#}");
-                    }
-                }
-            })
-            .await;
+            self.rescan(paths).await;
         }
+    }
+
+    /// Rescans the folders containing `paths` right away (e.g. after the app itself
+    /// moved a file), without waiting for the watcher.
+    pub async fn rescan(&self, paths: Vec<PathBuf>) {
+        let targets = self.scan_targets(paths);
+        if targets.is_empty() {
+            return;
+        }
+        let _guard = self.inner.scan_lock.lock().await;
+        let inner = self.inner.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            for (root_id, root, target) in targets {
+                if let Err(err) = scanner::scan(&inner.db, root_id, &root, &target, &inner.excludes)
+                {
+                    tracing::warn!(path = %target.display(), "scan failed: {err:#}");
+                }
+            }
+        })
+        .await;
+    }
+
+    /// The configured media roots as `(id, path)`.
+    pub fn roots(&self) -> &[(i64, PathBuf)] {
+        &self.inner.roots
     }
 
     /// Maps changed paths to the minimal set of directories to rescan.

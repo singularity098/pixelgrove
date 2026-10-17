@@ -71,7 +71,7 @@ the original. Browse API calls take 1–4 ms at 100k files.
 |---|---|
 | Admin | Everything, incl. settings, watch directories, users |
 | Editor | Browse, download, favorite, share, delete (trash) |
-| Viewer | Browse, download, favorite — no settings or other changes |
+| Viewer | Browse and download — no changeable options (no favorites, sharing or trash) |
 
 - Admins can optionally restrict a user to specific folders.
 - **First run:** a setup screen creates the admin; can also be set with environment variables.
@@ -172,7 +172,7 @@ A synthetic library can be generated with `scripts/gen-bench-library.py`.
 | M2 ✅ | **Auth & users** | First-run setup, login, sessions, roles, folder restrictions, user management |
 | M3 ✅ | **Core browsing** | App shell + sidebar, dark/light theme, Photos (folders) view, folder view, preview pipeline, photo/video viewer (zoom, wheel, swipe, download, clipboard, info) |
 | M4 ✅ | **Timeline, File View, Search** | Timeline with scrubber, File View tree + filter, global search |
-| M5 | **Favorites, Trash, Storage** | Per-user favorites, trash with restore/purge, storage display |
+| M5 ✅ | **Favorites, Trash, Storage** | Per-user favorites, trash with restore/purge, storage display |
 | M6 | **Sharing** | Share links for files/folders, public share pages, Sharing management view |
 | M7 | **Map & Explore** | Offline reverse geocoding, map with clustering, Explore facets |
 | M8 | **Slideshow & polish** | Slideshow, mobile/desktop polish, 100k-file benchmark pass, docs (README, docker-compose example) |

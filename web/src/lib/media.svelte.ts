@@ -49,6 +49,8 @@ export interface MediaSource {
   readonly items: MediaItem[];
   readonly total: number | null;
   more(): Promise<boolean>;
+  /** Drops an item that no longer belongs (e.g. moved to the trash). */
+  remove(id: number): void;
 }
 
 export interface FolderHit {
@@ -80,6 +82,7 @@ export interface MediaDetail extends MediaItem {
   latitude: number | null;
   longitude: number | null;
   description: string | null;
+  favorite: boolean;
 }
 
 export interface Paged<T> {
@@ -103,6 +106,13 @@ export class PagedList<T> {
     private readonly path: string,
     private readonly pageSize = 120,
   ) {}
+
+  remove(id: number): void {
+    const index = this.items.findIndex((item) => (item as { id: number }).id === id);
+    if (index < 0) return;
+    this.items.splice(index, 1);
+    if (this.total !== null) this.total--;
+  }
 
   get done(): boolean {
     return this.total !== null && this.items.length >= this.total;

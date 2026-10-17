@@ -11,6 +11,7 @@ mod scanner;
 mod server;
 #[cfg(test)]
 mod testdata;
+mod trash;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -111,6 +112,7 @@ fn bootstrap_admin(db: &Db, config: &Config) -> Result<()> {
     Ok(())
 }
 
+/// Hourly housekeeping: expired sessions and trash older than 30 days.
 fn spawn_session_cleanup(db: Db) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3600));
@@ -120,6 +122,11 @@ fn spawn_session_cleanup(db: Db) {
                 Ok(0) => {}
                 Ok(n) => tracing::debug!(sessions = n, "removed expired sessions"),
                 Err(err) => tracing::warn!("removing expired sessions failed: {err:#}"),
+            }
+            match db.run(|conn| trash::purge_expired(conn)).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(items = n, "deleted items trashed over 30 days ago"),
+                Err(err) => tracing::warn!("emptying old trash failed: {err:#}"),
             }
         }
     });

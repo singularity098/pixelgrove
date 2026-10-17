@@ -20,6 +20,11 @@ export class Timeline implements MediaSource {
     return this.hasMore ? null : this.items.length;
   }
 
+  remove(id: number): void {
+    const index = this.items.findIndex((item) => item.id === id);
+    if (index >= 0) this.items.splice(index, 1);
+  }
+
   /** Restarts the list with items taken before `before` (null = newest). */
   reset(before: number | null): void {
     this.generation++;

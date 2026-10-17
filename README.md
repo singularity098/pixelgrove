@@ -2,7 +2,7 @@
 
 An ultra-light, fast, self-hosted photo and video library written in Rust.
 
-> **Status:** early development (milestone M4 — timeline, file view and search). See
+> **Status:** early development (milestone M5 — favorites, trash and storage). See
 > [docs/requirements.md](docs/requirements.md) and [docs/plan.md](docs/plan.md).
 
 ## Running with Docker
@@ -27,6 +27,14 @@ can add users under **Users**:
 
 Any user can be limited to specific folders. Until setup is complete, anyone who can
 reach the server can create the admin account, so finish setup before exposing it.
+
+## Trash
+
+Deleting an item moves it into a hidden `.pixelgrove-trash` folder at the top of its
+media folder (same volume, so nothing is copied), mirroring where it came from. It can
+be restored from **Trash** for 30 days, then it is deleted for good. Trash needs the
+media mounted read-write; on a read-only mount (`:ro`) PixelGrove says so and leaves the
+file alone. Favorites are per user and stored only in PixelGrove's database.
 
 ## Configuration
 
