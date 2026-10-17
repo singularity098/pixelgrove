@@ -7,6 +7,7 @@ use axum::body::Body;
 use axum::extract::{Path as UrlPath, Query, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use futures_util::StreamExt;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
@@ -182,6 +183,8 @@ pub(super) struct FileRef<'a> {
     pub mtime: i64,
     pub size: i64,
     pub orientation: Option<u16>,
+    /// Served through a share link: remove location data from originals.
+    pub strip_location: bool,
 }
 
 pub(super) async fn preview_response(
@@ -219,7 +222,7 @@ pub(super) async fn preview_response(
             Body::from(bytes),
         )
             .into_response(),
-        Preview::Original => serve_file(file.path, request).await?,
+        Preview::Original => serve_original(state, &file, request).await?,
     };
     response
         .headers_mut()
@@ -229,11 +232,12 @@ pub(super) async fn preview_response(
 
 /// The original file, with HTTP range support (needed for video seeking).
 pub(super) async fn file_response(
+    state: &AppState,
     file: FileRef<'_>,
     versioned: &Versioned,
     request: Request,
 ) -> ApiResult<Response> {
-    let mut response = serve_file(file.path, request).await?;
+    let mut response = serve_original(state, &file, request).await?;
     let headers = response.headers_mut();
     headers.insert(header::CACHE_CONTROL, cache_control(versioned, file.mtime));
     if file.name.to_ascii_lowercase().ends_with(".mov") {
@@ -257,6 +261,7 @@ impl MediaRow {
             mtime: self.mtime,
             size: self.size,
             orientation: self.orientation,
+            strip_location: false,
         }
     }
 }
@@ -282,7 +287,50 @@ pub async fn file(
 ) -> ApiResult<Response> {
     let m = visible(&state, current.user, id).await?;
     let path = m.path();
-    file_response(m.file_ref(&path), &versioned, request).await
+    file_response(&state, m.file_ref(&path), &versioned, request).await
+}
+
+/// The original file, without location data when it goes out through a share link.
+/// Patches keep every byte offset, so ranges and lengths from `ServeFile` stay right.
+async fn serve_original(
+    state: &AppState,
+    file: &FileRef<'_>,
+    request: Request,
+) -> ApiResult<Response> {
+    let response = serve_file(file.path, request).await?;
+    if !file.strip_location {
+        return Ok(response);
+    }
+    let start = match response.status() {
+        StatusCode::OK => 0,
+        StatusCode::PARTIAL_CONTENT => response
+            .headers()
+            .get(header::CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("bytes "))
+            .and_then(|v| v.split('-').next())
+            .and_then(|v| v.parse::<u64>().ok())
+            .ok_or_else(|| anyhow::anyhow!("unexpected range response"))?,
+        _ => return Ok(response), // 304, 416, HEAD-only: no file bytes.
+    };
+    let patches = state
+        .locations
+        .get(file.cache_id, file.mtime, file.size, file.path, file.kind)
+        .await?;
+    if patches.is_empty() {
+        return Ok(response);
+    }
+    let (parts, body) = response.into_parts();
+    let mut offset = start;
+    let stream = body.into_data_stream().map(move |chunk| {
+        chunk.map(|bytes| {
+            let len = bytes.len() as u64;
+            let patched = crate::location::apply(&patches, offset, bytes);
+            offset += len;
+            patched
+        })
+    });
+    Ok(Response::from_parts(parts, Body::from_stream(stream)))
 }
 
 async fn serve_file(path: &Path, request: Request) -> ApiResult<Response> {

@@ -15,7 +15,7 @@ use super::browse::{
     MEDIA_ITEM_COLUMNS, MediaItem, Paged, Subfolder, load_folder, media_page, subfolders_of,
 };
 use super::media::{FileRef, MediaRow, Versioned, file_response, load, preview_response};
-use super::{ApiError, ApiResult, is_https};
+use super::{ApiError, ApiResult, ClientIp, is_https};
 use crate::server::AppState;
 use crate::shares::{self, Share};
 
@@ -135,12 +135,13 @@ pub struct Unlock {
 pub async fn unlock(
     State(state): State<AppState>,
     UrlPath(token): UrlPath<String>,
+    ClientIp(client): ClientIp,
     headers: axum::http::HeaderMap,
     jar: CookieJar,
     Json(body): Json<Unlock>,
 ) -> ApiResult<(CookieJar, Json<ShareInfo>)> {
     let throttle_key = format!("share:{token}");
-    if state.login_throttle.is_locked(&throttle_key) {
+    if state.login_throttle.is_locked(client, &throttle_key) {
         return Err(ApiError::status(
             StatusCode::TOO_MANY_REQUESTS,
             "Too many attempts. Try again in a few minutes.",
@@ -154,7 +155,7 @@ pub async fn unlock(
     })
     .await?;
     if !correct {
-        state.login_throttle.record_failure(&throttle_key);
+        state.login_throttle.record_failure(client, &throttle_key);
         return Err(ApiError::status(
             StatusCode::FORBIDDEN,
             "Incorrect password.",
@@ -344,6 +345,7 @@ fn file_ref<'a>(m: &'a MediaRow, path: &'a Path) -> FileRef<'a> {
         mtime: m.mtime,
         size: m.size,
         orientation: m.orientation,
+        strip_location: true,
     }
 }
 
@@ -378,7 +380,7 @@ pub async fn file(
         ));
     }
     let path = m.path();
-    file_response(file_ref(&m, &path), &versioned, request).await
+    file_response(&state, file_ref(&m, &path), &versioned, request).await
 }
 
 #[cfg(test)]
@@ -588,6 +590,77 @@ mod tests {
             .send("GET", &format!("/api/s/{token}"), None, Some(&cookie))
             .await;
         assert_eq!(info.body["locked"], true);
+    }
+
+    async fn body_bytes(response: axum::response::Response) -> Vec<u8> {
+        use http_body_util::BodyExt;
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec()
+    }
+
+    fn location(bytes: &[u8]) -> Option<f64> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.jpg");
+        std::fs::write(&path, bytes).unwrap();
+        crate::metadata::read(
+            &mut nom_exif::MediaParser::new(),
+            &path,
+            crate::metadata::MediaKind::Image,
+        )
+        .latitude
+    }
+
+    #[tokio::test]
+    async fn shared_files_have_no_location() {
+        let app = TestApp::new();
+        let original = testdata::jpeg_at_location("2023:05:01 12:00:00", 35.0116, 135.7681);
+        app.write_media("trip/kyoto.jpg", &original);
+        app.scan();
+        let admin = app.setup_admin().await;
+        let id = app.media_id("kyoto.jpg");
+        let share = create(
+            &app,
+            &admin,
+            json!({"folder_id": app.folder_id("trip"), "allow_download": true}),
+        )
+        .await;
+        let token = share["token"].as_str().unwrap();
+
+        // Library users get the file as it is.
+        let library = body_bytes(
+            app.get_raw(&format!("/api/media/{id}/file"), &admin, None)
+                .await,
+        )
+        .await;
+        assert_eq!(library, original);
+
+        // Visitors get it without GPS: the whole file, ranges, and as-is previews.
+        let file_uri = format!("/api/s/{token}/media/{id}/file");
+        let shared = body_bytes(app.get_raw(&file_uri, "", None).await).await;
+        assert_eq!(shared.len(), original.len());
+        assert_ne!(shared, original);
+        assert!(location(&original).is_some());
+        assert_eq!(location(&shared), None);
+        let head = app.get_raw(&file_uri, "", Some("bytes=0-99")).await;
+        assert_eq!(head.status(), StatusCode::PARTIAL_CONTENT);
+        let mut pieces = body_bytes(head).await;
+        let tail = app.get_raw(&file_uri, "", Some("bytes=100-")).await;
+        pieces.extend(body_bytes(tail).await);
+        assert_eq!(pieces, shared, "ranges carry the same stripped bytes");
+        // This tiny JPEG is small enough to be its own preview.
+        let preview = app
+            .get_raw(
+                &format!("/api/s/{token}/media/{id}/preview/large"),
+                "",
+                None,
+            )
+            .await;
+        assert_eq!(body_bytes(preview).await, shared);
     }
 
     #[tokio::test]

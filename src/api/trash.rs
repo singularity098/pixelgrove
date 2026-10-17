@@ -184,6 +184,7 @@ fn file_ref(item: &TrashItem) -> FileRef<'_> {
         mtime: item.mtime,
         size: item.size,
         orientation: item.orientation,
+        strip_location: false,
     }
 }
 
@@ -208,7 +209,7 @@ pub async fn file(
 ) -> ApiResult<Response> {
     current.require(Role::Editor)?;
     let item = visible_item(&state, &current.user, id).await?;
-    file_response(file_ref(&item), &versioned, request).await
+    file_response(&state, file_ref(&item), &versioned, request).await
 }
 
 pub async fn restore(

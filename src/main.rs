@@ -5,6 +5,7 @@ mod auth;
 mod config;
 mod db;
 mod indexer;
+mod location;
 mod metadata;
 mod places;
 mod preview;
@@ -89,10 +90,14 @@ async fn serve() -> Result<()> {
         db,
         indexer,
         login_throttle: Default::default(),
+        locations: Default::default(),
     });
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 

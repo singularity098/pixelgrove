@@ -58,5 +58,7 @@
     onindex={show}
     onclose={close}
     onremoved={removed}
-    onneedmore={() => source.more()} />
+    onneedmore={() => source.more()}
+    {urls}
+    {readOnly} />
 {/if}

@@ -16,7 +16,9 @@ axum-extra = { version = "0.12.6", features = ["cookie"] }
 bytes = "1.12.1"
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 cookie = "0.18"
+crc32fast = "1.5.2"
 fast_image_resize = "6.1.0"
+futures-util = { version = "0.3.34", default-features = false }
 getrandom = "0.4.3"
 globset = "0.4.20"
 hex = "0.4.3"
@@ -26,6 +28,7 @@ jpeg-decoder = "0.3.2"
 jpeg-encoder = "0.7.1"
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 lru = "0.18.5"
+memchr = "2.8.3"
 mimalloc = { version = "0.1.52", default-features = false }
 nom-exif = "3.8.0"
 notify = "8.2.0"

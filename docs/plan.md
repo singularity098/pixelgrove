@@ -82,6 +82,11 @@ the original. Browse API calls take 1–4 ms at 100k files.
 - Viewers have no changeable options, so they can't change their own password (an admin can).
 - **Share links** (file or folder): optional expiry, optional password, download on/off;
   folder links show items added later; revocable from the Sharing page.
+- Hardening for public exposure (after M8): failed passwords are throttled per client
+  address (10 per 15 min; `X-Forwarded-For` trusted only from private networks) and per
+  account (100); security headers (CSP, frame-ancestors, nosniff, no-referrer, HSTS
+  over HTTPS); location data is removed from files served through share links by
+  same-length byte patches applied while streaming, so range requests still work.
 - A **public base URL** setting is used to build share links (expected behind a reverse proxy with HTTPS;
   copy-to-clipboard requires HTTPS).
 

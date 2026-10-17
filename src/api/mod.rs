@@ -15,7 +15,9 @@ mod timeline;
 mod trash;
 mod users;
 
-use axum::extract::{FromRequestParts, Request};
+use std::net::{IpAddr, SocketAddr};
+
+use axum::extract::{ConnectInfo, FromRequestParts, Request};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
@@ -226,7 +228,60 @@ impl FromRequestParts<AppState> for AdminUser {
 
 /// Whether the client reached us over HTTPS (directly or via a reverse proxy), which
 /// decides whether cookies get the `Secure` flag.
-pub(super) fn is_https(state: &AppState, headers: &HeaderMap) -> bool {
+/// The visitor's IP address, for throttling password guesses. Behind a reverse proxy
+/// (a connection from a private network) it's taken from `X-Forwarded-For`: the
+/// rightmost public address, which the outermost proxy added and the visitor can't
+/// forge. `None` when unknown (e.g. in tests).
+pub struct ClientIp(pub Option<IpAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        let peer = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.0.ip().to_canonical());
+        Ok(ClientIp(client_ip(peer, &parts.headers)))
+    }
+}
+
+fn is_private(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                // Carrier-grade NAT range, also used by Tailscale.
+                || (ip.octets()[0] == 100 && (64..128).contains(&ip.octets()[1]))
+        }
+        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local(),
+    }
+}
+
+fn client_ip(peer: Option<IpAddr>, headers: &HeaderMap) -> Option<IpAddr> {
+    let peer = peer?;
+    if !is_private(peer) {
+        return Some(peer);
+    }
+    let forwarded: Vec<IpAddr> = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .filter_map(|v| v.trim().parse::<IpAddr>().ok())
+        .map(|ip| ip.to_canonical())
+        .collect();
+    forwarded
+        .iter()
+        .rev()
+        .find(|ip| !is_private(**ip))
+        .or(forwarded.last())
+        .copied()
+        .or(Some(peer))
+}
+
+pub(crate) fn is_https(state: &AppState, headers: &HeaderMap) -> bool {
     state
         .config
         .public_url
@@ -280,6 +335,7 @@ pub mod test_support {
                 indexer,
                 login_throttle: Default::default(),
                 previews: Arc::new(crate::preview::Previews::new(1 << 20)),
+                locations: Default::default(),
             };
             Self {
                 router: router(state),
@@ -333,6 +389,11 @@ pub mod test_support {
         }
 
         /// A GET returning the raw response (for binary bodies and headers).
+        /// Sends any request (e.g. with a client address or extra headers).
+        pub async fn request(&self, request: Request<Body>) -> axum::response::Response {
+            self.router.clone().oneshot(request).await.unwrap()
+        }
+
         pub async fn get_raw(
             &self,
             uri: &str,

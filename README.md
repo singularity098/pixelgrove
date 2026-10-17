@@ -97,6 +97,10 @@ downloads off, photos are shown as previews only and videos still play). Folder 
 show items added later. Manage links under **Sharing**; admins see everyone's. Set
 `PIXELGROVE_PUBLIC_URL` so links use your public address.
 
+Files opened through a share link have their **location removed**: GPS in photos'
+EXIF and XMP, and the location phones record in videos. Your files on disk are not
+changed, and signed-in users still see where photos were taken.
+
 ## Slideshow
 
 Start a slideshow from any folder (**Slideshow** next to the folder name, also on shared
@@ -106,6 +110,40 @@ end, then it moves on) and whether photos in subfolders are included. The choice
 remembered in the browser. Keys: space pauses, ← → step, Esc ends (and the viewer then
 shows the last photo). On phones, swipe to step and tap to show the controls. It goes
 full screen where the browser allows and keeps the screen awake.
+
+## Security
+
+PixelGrove is designed to be reachable from the internet for sharing, behind a reverse
+proxy with HTTPS (see above). Before opening it up:
+
+- **Finish setup first**, or set `PIXELGROVE_ADMIN_USER` / `PIXELGROVE_ADMIN_PASSWORD`:
+  until an admin exists, anyone who reaches the server can create one.
+- **Don't publish port 8080 directly**; let only the proxy reach it. PixelGrove takes a
+  visitor's address from `X-Forwarded-For` when the connection comes from a private
+  network (the proxy), using the rightmost public address, which the visitor can't
+  forge.
+- Give share links an **expiry** when they're for one occasion. "Downloads off" stops
+  originals being downloaded but not screenshots; videos still stream.
+
+What it does for you:
+
+- **Password guessing:** after 10 wrong passwords (sign-in or share-link passwords) a
+  visitor's address (or IPv6 /64) is blocked for 15 minutes; you can still sign in from
+  elsewhere. An account also locks after 100 failures from all addresses together.
+- **Sessions:** Argon2id password hashes; only hashes of session tokens are stored;
+  cookies are `HttpOnly`, `SameSite=Lax` and `Secure` behind HTTPS; changing a password
+  or disabling a user signs them out everywhere.
+- **Browser protections** on every response: a Content-Security-Policy (no inline or
+  third-party scripts; only OpenStreetMap tiles from elsewhere), no framing by other
+  sites, `nosniff`, `Referrer-Policy: no-referrer` (share links never leak to other
+  sites), and HSTS when served over HTTPS. State-changing requests need a custom header,
+  which blocks cross-site request forgery.
+- **Sharing:** 128-bit random link tokens, nothing outside the shared folder is
+  reachable, no server paths or GPS in what visitors see, and location stripped from
+  shared files as described above. (Not covered: GPS kept in camera maker notes, or in
+  telemetry tracks such as GoPro's.)
+- **Container:** a single static binary on an empty `scratch` image, run as your user;
+  mount media `:ro` if you don't need Trash.
 
 ## Map and Explore
 

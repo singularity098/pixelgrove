@@ -7,7 +7,7 @@ use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use serde::{Deserialize, Serialize};
 
-use super::{ApiError, ApiResult, CurrentUser, SESSION_COOKIE, is_https};
+use super::{ApiError, ApiResult, ClientIp, CurrentUser, SESSION_COOKIE, is_https};
 use crate::auth::{self, Role, User};
 use crate::server::AppState;
 
@@ -49,12 +49,14 @@ pub async fn setup(
 
 pub async fn login(
     State(state): State<AppState>,
+    ClientIp(client): ClientIp,
     headers: HeaderMap,
     jar: CookieJar,
     Json(body): Json<Credentials>,
 ) -> ApiResult<(CookieJar, Json<User>)> {
     let username = body.username.trim().to_string();
-    if state.login_throttle.is_locked(&username) {
+    let account = format!("user:{username}");
+    if state.login_throttle.is_locked(client, &account) {
         return Err(ApiError::status(
             StatusCode::TOO_MANY_REQUESTS,
             "Too many failed attempts. Try again in a few minutes.",
@@ -76,13 +78,13 @@ pub async fn login(
         })
         .await?;
     let Some(user) = user else {
-        state.login_throttle.record_failure(&username);
+        state.login_throttle.record_failure(client, &account);
         return Err(ApiError::status(
             StatusCode::UNAUTHORIZED,
             "Incorrect username or password.",
         ));
     };
-    state.login_throttle.clear(&username);
+    state.login_throttle.clear(&account);
     start_session(&state, &headers, jar, user).await
 }
 
@@ -232,11 +234,80 @@ mod tests {
         );
     }
 
+    /// Signs in from `peer`, optionally through a proxy reporting `forwarded_for`.
+    async fn login_from(
+        app: &TestApp,
+        peer: &str,
+        forwarded_for: Option<&str>,
+        password: &str,
+    ) -> StatusCode {
+        let mut request = axum::http::Request::post("/api/auth/login")
+            .header(crate::api::CSRF_HEADER, "1")
+            .header(axum::http::header::CONTENT_TYPE, "application/json");
+        if let Some(forwarded) = forwarded_for {
+            request = request.header("x-forwarded-for", forwarded);
+        }
+        let mut request = request
+            .body(axum::body::Body::from(
+                json!({"username": "admin", "password": password}).to_string(),
+            ))
+            .unwrap();
+        let peer: std::net::SocketAddr = format!("{peer}:50000").parse().unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(peer));
+        app.request(request).await.status()
+    }
+
     #[tokio::test]
-    async fn login_is_throttled() {
+    async fn login_throttles_the_guesser_not_the_owner() {
         let app = TestApp::new();
         app.setup_admin().await;
         for _ in 0..10 {
+            let status = login_from(&app, "203.0.113.9", None, "wrong-password").await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+        }
+        // The guesser is blocked, even with the right password...
+        let blocked = login_from(&app, "203.0.113.9", None, "admin-password").await;
+        assert_eq!(blocked, StatusCode::TOO_MANY_REQUESTS);
+        // ...and can't dodge it with a made-up X-Forwarded-For when connecting directly.
+        let spoofed =
+            login_from(&app, "203.0.113.9", Some("198.51.100.77"), "admin-password").await;
+        assert_eq!(spoofed, StatusCode::TOO_MANY_REQUESTS);
+        // The owner, elsewhere, signs in fine.
+        let owner = login_from(&app, "198.51.100.7", None, "admin-password").await;
+        assert_eq!(owner, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn login_behind_a_proxy_uses_the_forwarded_address() {
+        let app = TestApp::new();
+        app.setup_admin().await;
+        // Both arrive from the proxy's private address; the proxy appends the real one.
+        for _ in 0..10 {
+            login_from(&app, "172.18.0.2", Some("1.2.3.4, 203.0.113.9"), "nope").await;
+        }
+        let guesser = login_from(&app, "172.18.0.2", Some("203.0.113.9"), "admin-password").await;
+        assert_eq!(guesser, StatusCode::TOO_MANY_REQUESTS);
+        // Faking an extra address on the left doesn't help the guesser either.
+        let faked = login_from(
+            &app,
+            "172.18.0.2",
+            Some("5.6.7.8, 203.0.113.9"),
+            "admin-password",
+        )
+        .await;
+        assert_eq!(faked, StatusCode::TOO_MANY_REQUESTS);
+        let owner = login_from(&app, "172.18.0.2", Some("198.51.100.7"), "admin-password").await;
+        assert_eq!(owner, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn login_is_throttled_per_account_too() {
+        let app = TestApp::new();
+        app.setup_admin().await;
+        // Without a known client address only the (generous) account limit applies.
+        for _ in 0..crate::auth::MAX_ACCOUNT_FAILURES {
             app.login("admin", "wrong-password").await;
         }
         let locked = app.login("admin", "admin-password").await;

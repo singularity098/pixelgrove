@@ -1,6 +1,7 @@
 //! Users, passwords and sessions.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -437,38 +438,69 @@ pub fn purge_expired_sessions(conn: &Connection) -> Result<usize> {
 
 // ---- Login throttling ----
 
-/// Limits failed logins per username, to slow down password guessing.
+/// Slows down password guessing (sign-in and share-link passwords). Failures count per
+/// client and, far more generously, per account: one stranger guessing is stopped
+/// quickly without locking the real person out of their own account.
 #[derive(Default)]
 pub struct LoginThrottle {
     failures: Mutex<HashMap<String, (u32, Instant)>>,
 }
 
-const MAX_FAILURES: u32 = 10;
+/// Failed attempts allowed from one client (IP address, or IPv6 /64) per window.
+pub const MAX_CLIENT_FAILURES: u32 = 10;
+/// Failed attempts allowed against one account per window, from all clients together.
+pub const MAX_ACCOUNT_FAILURES: u32 = 100;
 const FAILURE_WINDOW: Duration = Duration::from_secs(15 * 60);
+/// Bounds memory if someone sprays attempts from very many addresses.
+const MAX_TRACKED: usize = 100_000;
+
+fn client_key(client: IpAddr) -> String {
+    match client {
+        IpAddr::V4(ip) => format!("ip:{ip}"),
+        // One IPv6 subscriber usually gets a whole /64; count it as one client.
+        IpAddr::V6(ip) => {
+            let s = ip.segments();
+            format!("ip:{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
+        }
+    }
+}
 
 impl LoginThrottle {
-    pub fn is_locked(&self, username: &str) -> bool {
+    /// Whether attempts from `client` on `account` (e.g. `user:ann`) are blocked.
+    pub fn is_locked(&self, client: Option<IpAddr>, account: &str) -> bool {
         let failures = self.failures.lock().unwrap();
-        matches!(
-            failures.get(&username.to_lowercase()),
-            Some((count, since)) if *count >= MAX_FAILURES && since.elapsed() < FAILURE_WINDOW
-        )
+        let over = |key: &str, max: u32| {
+            matches!(
+                failures.get(key),
+                Some((count, since)) if *count >= max && since.elapsed() < FAILURE_WINDOW
+            )
+        };
+        client.is_some_and(|c| over(&client_key(c), MAX_CLIENT_FAILURES))
+            || over(&account.to_lowercase(), MAX_ACCOUNT_FAILURES)
     }
 
-    pub fn record_failure(&self, username: &str) {
+    pub fn record_failure(&self, client: Option<IpAddr>, account: &str) {
         let mut failures = self.failures.lock().unwrap();
         failures.retain(|_, (_, since)| since.elapsed() < FAILURE_WINDOW);
-        let entry = failures
-            .entry(username.to_lowercase())
-            .or_insert((0, Instant::now()));
-        entry.0 += 1;
+        for key in client
+            .map(client_key)
+            .into_iter()
+            .chain([account.to_lowercase()])
+        {
+            if failures.len() >= MAX_TRACKED && !failures.contains_key(&key) {
+                continue;
+            }
+            failures.entry(key).or_insert((0, Instant::now())).0 += 1;
+        }
     }
 
-    pub fn clear(&self, username: &str) {
+    /// After a correct password. The client's count is left to expire, so someone with
+    /// one valid account can't use it to reset their guessing budget.
+    pub fn clear(&self, account: &str) {
         self.failures
             .lock()
             .unwrap()
-            .remove(&username.to_lowercase());
+            .remove(&account.to_lowercase());
     }
 }
 
@@ -652,15 +684,55 @@ mod tests {
     }
 
     #[test]
-    fn throttle_locks_after_repeated_failures() {
+    fn throttle_blocks_the_guesser_not_the_account() {
         let throttle = LoginThrottle::default();
-        for _ in 0..MAX_FAILURES {
-            assert!(!throttle.is_locked("Bob"));
-            throttle.record_failure("bob");
+        let attacker = Some("203.0.113.9".parse().unwrap());
+        let owner = Some("198.51.100.7".parse().unwrap());
+        for _ in 0..MAX_CLIENT_FAILURES {
+            assert!(!throttle.is_locked(attacker, "user:Bob"));
+            throttle.record_failure(attacker, "user:bob");
         }
-        assert!(throttle.is_locked("BOB"));
-        throttle.clear("bob");
-        assert!(!throttle.is_locked("bob"));
+        assert!(throttle.is_locked(attacker, "user:BOB"));
+        assert!(throttle.is_locked(attacker, "user:someone-else"));
+        assert!(
+            !throttle.is_locked(owner, "user:bob"),
+            "the owner can still sign in"
+        );
+        // A successful sign-in doesn't reset the guesser's budget.
+        throttle.clear("user:bob");
+        assert!(throttle.is_locked(attacker, "user:bob"));
+    }
+
+    #[test]
+    fn throttle_limits_each_account_across_clients() {
+        let throttle = LoginThrottle::default();
+        for i in 0..MAX_ACCOUNT_FAILURES {
+            let client = Some(std::net::IpAddr::from([
+                10,
+                0,
+                (i / 250) as u8,
+                (i % 250) as u8,
+            ]));
+            throttle.record_failure(client, "user:ann");
+        }
+        let fresh = Some("192.0.2.1".parse().unwrap());
+        assert!(throttle.is_locked(fresh, "user:ann"));
+        assert!(!throttle.is_locked(fresh, "user:bob"));
+        throttle.clear("user:ann");
+        assert!(!throttle.is_locked(fresh, "user:ann"));
+    }
+
+    #[test]
+    fn ipv6_clients_are_grouped_by_network() {
+        let throttle = LoginThrottle::default();
+        for i in 0..MAX_CLIENT_FAILURES {
+            let ip: IpAddr = format!("2001:db8:1:2::{i:x}").parse().unwrap();
+            throttle.record_failure(Some(ip), "user:ann");
+        }
+        let same_network: IpAddr = "2001:db8:1:2:ffff::1".parse().unwrap();
+        let other_network: IpAddr = "2001:db8:1:3::1".parse().unwrap();
+        assert!(throttle.is_locked(Some(same_network), "user:bob"));
+        assert!(!throttle.is_locked(Some(other_network), "user:bob"));
     }
 
     #[test]
