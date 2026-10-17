@@ -1,5 +1,7 @@
 mod alloc;
+mod api;
 mod assets;
+mod auth;
 mod config;
 mod db;
 mod indexer;
@@ -43,7 +45,8 @@ async fn serve() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_env("PIXELGROVE_LOG")
-                .unwrap_or_else(|_| EnvFilter::new("info,tower_http=warn")),
+                // nom_exif logs at ERROR/WARN for routine things like a photo without GPS.
+                .unwrap_or_else(|_| EnvFilter::new("info,tower_http=warn,nom_exif=off")),
         )
         .init();
 
@@ -63,18 +66,58 @@ async fn serve() -> Result<()> {
     );
 
     let db = Db::open(&config.config_dir.join(db::DB_FILE_NAME))?;
+    bootstrap_admin(&db, &config)?;
     let indexer = Indexer::new(db.clone(), &config)?;
     indexer.start();
+    spawn_session_cleanup(db.clone());
 
     let app = server::router(AppState {
         config: Arc::new(config),
         db,
         indexer,
+        login_throttle: Default::default(),
     });
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
+}
+
+/// Creates the admin from `PIXELGROVE_ADMIN_*` if there are no users yet; otherwise
+/// the web UI asks for one on first visit.
+fn bootstrap_admin(db: &Db, config: &Config) -> Result<()> {
+    let mut conn = db.conn()?;
+    if auth::user_count(&conn)? > 0 {
+        return Ok(());
+    }
+    match &config.initial_admin {
+        Some(admin) => {
+            let username = auth::clean_username(&admin.username)
+                .map_err(|e| anyhow::anyhow!("PIXELGROVE_ADMIN_USER: {e}"))?;
+            auth::check_password(&admin.password)
+                .map_err(|e| anyhow::anyhow!("PIXELGROVE_ADMIN_PASSWORD: {e}"))?;
+            auth::create_first_admin(&mut conn, &username, &admin.password)?;
+            tracing::info!(%username, "created admin account from environment");
+        }
+        None => tracing::warn!(
+            "no accounts exist yet: open PixelGrove in a browser to create the admin account"
+        ),
+    }
+    Ok(())
+}
+
+fn spawn_session_cleanup(db: Db) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            match db.run(|conn| auth::purge_expired_sessions(conn)).await {
+                Ok(0) => {}
+                Ok(n) => tracing::debug!(sessions = n, "removed expired sessions"),
+                Err(err) => tracing::warn!("removing expired sessions failed: {err:#}"),
+            }
+        }
+    });
 }
 
 async fn shutdown_signal() {

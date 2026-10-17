@@ -53,3 +53,124 @@ button {
   font: inherit;
   color: inherit;
 }
+
+a {
+  color: var(--accent);
+}
+
+h2 {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.page.narrow {
+  max-width: 480px;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.success {
+  color: var(--accent);
+}
+
+form {
+  text-align: left;
+}
+
+label {
+  display: block;
+  margin-bottom: 14px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+label.choice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+input:not([type='radio'], [type='checkbox']),
+textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 9px 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+form > button.primary {
+  width: 100%;
+}
+
+.dialog-actions button.primary {
+  width: auto;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+button.ghost:hover {
+  background: var(--surface-2);
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+button.icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+}

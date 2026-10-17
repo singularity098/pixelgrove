@@ -14,5 +14,8 @@ services:
     environment:
       # Externally reachable URL, used to build share links.
       # PIXELGROVE_PUBLIC_URL: https://photos.example.com
+      # Optional: create the admin on first start instead of using the setup screen.
+      # PIXELGROVE_ADMIN_USER: admin
+      # PIXELGROVE_ADMIN_PASSWORD: change-me-please
       TZ: Etc/UTC
     restart: unless-stopped

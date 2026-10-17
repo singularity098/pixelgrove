@@ -13,7 +13,8 @@ pub const DB_FILE_NAME: &str = "pixelgrove.db";
 pub type Conn = PooledConnection<SqliteConnectionManager>;
 
 /// Schema migrations, applied in order. `PRAGMA user_version` records how many have run.
-const MIGRATIONS: &[&str] = &[r#"
+const MIGRATIONS: &[&str] = &[
+    r#"
 CREATE TABLE roots (
     id    INTEGER PRIMARY KEY,
     path  TEXT NOT NULL UNIQUE
@@ -59,7 +60,36 @@ CREATE TABLE media (
 );
 CREATE INDEX media_folder_taken ON media(folder_id, taken_at DESC);
 CREATE INDEX media_taken ON media(taken_at DESC);
-"#];
+"#,
+    r#"
+CREATE TABLE users (
+    id            INTEGER PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL CHECK (role IN ('admin', 'editor', 'viewer')),
+    disabled      INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL
+);
+
+-- Only a SHA-256 of each session token is stored, so a leaked database can't be
+-- used to hijack sessions.
+CREATE TABLE sessions (
+    token_hash   BLOB PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at   INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX sessions_user ON sessions(user_id);
+
+-- Folders a user is limited to (they see these and everything below them).
+-- No rows means the whole library.
+CREATE TABLE user_folders (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    path    TEXT NOT NULL,
+    PRIMARY KEY (user_id, path)
+) WITHOUT ROWID;
+"#,
+];
 
 #[derive(Clone)]
 pub struct Db {
@@ -84,6 +114,16 @@ impl Db {
 
     pub fn conn(&self) -> Result<Conn> {
         Ok(self.pool.get()?)
+    }
+
+    /// Runs `f` with a pooled connection on the blocking thread pool.
+    pub async fn run<T, F>(&self, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T> + Send + 'static,
+    {
+        let db = self.clone();
+        tokio::task::spawn_blocking(move || f(&mut *db.conn()?)).await?
     }
 }
 

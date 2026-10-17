@@ -10,9 +10,14 @@ publish = false
 
 [dependencies]
 anyhow = "1.0.104"
+argon2 = "0.6.0"
 axum = "0.8.9"
+axum-extra = { version = "0.12.6", features = ["cookie"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+cookie = "0.18"
+getrandom = "0.4.3"
 globset = "0.4.20"
+hex = "0.4.3"
 imagesize = "0.15.0"
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 mimalloc = { version = "0.1.52", default-features = false }
@@ -26,6 +31,7 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 rust-embed = { version = "8.13.0", features = ["mime-guess"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.11.1"
 tokio = { version = "1.53.3", features = ["full"] }
 toml = "1.1.8"
 tower-http = { version = "0.7.1", features = ["trace", "compression-gzip", "compression-br"] }
@@ -43,3 +49,11 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# Password hashing is deliberately expensive; unoptimised it makes tests and dev
+# logins crawl.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

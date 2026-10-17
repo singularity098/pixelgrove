@@ -65,7 +65,11 @@ decisions made while reviewing them and the plan for building v1.
 
 - Admins can optionally restrict a user to specific folders.
 - **First run:** a setup screen creates the admin; can also be set with environment variables.
-- Passwords hashed with Argon2; cookie-based sessions.
+- Passwords hashed with Argon2id; cookie-based sessions (HttpOnly, SameSite=Lax, Secure behind
+  HTTPS) that expire after 30 days unused. Only a hash of each session token is stored.
+- Failed sign-ins are throttled per username (10 per 15 minutes).
+- State-changing API calls require a custom header, which blocks cross-site request forgery.
+- Viewers have no changeable options, so they can't change their own password (an admin can).
 - **Share links** (file or folder): optional expiry, optional password, download on/off;
   folder links show items added later; revocable from the Sharing page.
 - A **public base URL** setting is used to build share links (expected behind a reverse proxy with HTTPS;
@@ -155,7 +159,7 @@ A synthetic library can be generated with `scripts/gen-bench-library.py`.
 |---|---|---|
 | M0 ✅ | **Scaffold** | Cargo project, Svelte app embedded via `rust-embed`, config loading, Dockerfile (multi-arch), GitHub Actions CI + GHCR publish |
 | M1 ✅ | **Indexer** | SQLite schema + migrations, parallel scanner, EXIF/video metadata, folder aggregates, watcher, periodic rescan, exclusions |
-| M2 | **Auth & users** | First-run setup, login, sessions, roles, folder restrictions, user management |
+| M2 ✅ | **Auth & users** | First-run setup, login, sessions, roles, folder restrictions, user management |
 | M3 | **Core browsing** | App shell + sidebar, dark/light theme, Photos (folders) view, folder view, preview pipeline, photo/video viewer (zoom, wheel, swipe, download, clipboard, info) |
 | M4 | **Timeline, File View, Search** | Timeline with scrubber, File View tree + filter, global search |
 | M5 | **Favorites, Trash, Storage** | Per-user favorites, trash with restore/purge, storage display |

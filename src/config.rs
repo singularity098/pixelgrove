@@ -27,6 +27,24 @@ pub struct Config {
     pub rescan_interval_hours: u64,
     /// File/directory name globs that are never indexed (hidden entries are always skipped).
     pub exclude: Vec<String>,
+    /// Admin account to create on first start, from `PIXELGROVE_ADMIN_USER` and
+    /// `PIXELGROVE_ADMIN_PASSWORD` (environment only, so the password isn't kept in a file).
+    pub initial_admin: Option<InitialAdmin>,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct InitialAdmin {
+    pub username: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for InitialAdmin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InitialAdmin")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
 }
 
 impl Config {
@@ -42,6 +60,7 @@ impl Config {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+            initial_admin: None,
         }
     }
 
@@ -118,6 +137,12 @@ impl Config {
                 .map(str::to_string)
                 .collect();
         }
+        if let (Some(username), Some(password)) = (
+            env("PIXELGROVE_ADMIN_USER").filter(|u| !u.trim().is_empty()),
+            env("PIXELGROVE_ADMIN_PASSWORD").filter(|p| !p.is_empty()),
+        ) {
+            self.initial_admin = Some(InitialAdmin { username, password });
+        }
         Ok(())
     }
 }
@@ -181,6 +206,8 @@ mod tests {
             ("PIXELGROVE_CONFIG_DIR", dir_str),
             ("PIXELGROVE_PUBLIC_URL", "https://env.example"),
             ("PIXELGROVE_RESCAN_INTERVAL_HOURS", "12"),
+            ("PIXELGROVE_ADMIN_USER", "boss"),
+            ("PIXELGROVE_ADMIN_PASSWORD", "secret-password"),
         ]))
         .unwrap();
 
@@ -190,6 +217,9 @@ mod tests {
         assert_eq!(config.preview_cache_mb, 64);
         assert_eq!(config.rescan_interval_hours, 12);
         assert!(config.exclude.contains(&"@eaDir".to_string()));
+        let admin = config.initial_admin.unwrap();
+        assert_eq!(admin.username, "boss");
+        assert!(!format!("{admin:?}").contains("secret-password"));
     }
 
     #[test]
@@ -207,6 +237,7 @@ mod tests {
             vec![PathBuf::from("/media/a"), PathBuf::from("/data/b")]
         );
         assert_eq!(config.exclude, ["*.tmp", "Thumbs"]);
+        assert_eq!(config.initial_admin, None);
     }
 
     #[test]

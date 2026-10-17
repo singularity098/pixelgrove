@@ -2,7 +2,7 @@
 
 An ultra-light, fast, self-hosted photo and video library written in Rust.
 
-> **Status:** early development (milestone M1 — indexer). See
+> **Status:** early development (milestone M2 — accounts). See
 > [docs/requirements.md](docs/requirements.md) and [docs/plan.md](docs/plan.md).
 
 ## Running with Docker
@@ -12,6 +12,21 @@ See [docker-compose.example.yml](docker-compose.example.yml). Mount your librari
 
 Images are published to `ghcr.io/singularity098/pixelgrove`: `edge` tracks `main`,
 and version tags (`1.2.3`, `1.2`, `latest`) are created from `v*` git tags.
+
+## Accounts
+
+On first visit PixelGrove asks you to create the administrator account (or set
+`PIXELGROVE_ADMIN_USER` / `PIXELGROVE_ADMIN_PASSWORD` to create it on start-up). Admins
+can add users under **Users**:
+
+| Role | Can |
+|---|---|
+| Viewer | Browse and download. No changeable options, including their own password. |
+| Editor | Also favorites, sharing and trash, and change their own password. |
+| Admin | Everything, including settings and user management. |
+
+Any user can be limited to specific folders. Until setup is complete, anyone who can
+reach the server can create the admin account, so finish setup before exposing it.
 
 ## Configuration
 
@@ -27,8 +42,9 @@ Settings come from `/config/pixelgrove.toml` (optional), overridden by environme
 | `PIXELGROVE_RESCAN_INTERVAL_HOURS` | `6` | Hours between full rescans |
 | `PIXELGROVE_EXCLUDE` | `@eaDir,#recycle,#snapshot,lost+found` | Comma-separated name globs to skip (hidden entries are always skipped) |
 | `PIXELGROVE_LOG` | `info` | Log filter (e.g. `debug`) |
+| `PIXELGROVE_ADMIN_USER` / `PIXELGROVE_ADMIN_PASSWORD` | — | Creates this admin on first start, instead of the setup screen |
 
-Apart from `PIXELGROVE_LOG`, the same keys (lower-case, without the prefix) can be used in `pixelgrove.toml`.
+Apart from `PIXELGROVE_LOG` and the `PIXELGROVE_ADMIN_*` variables, the same keys (lower-case, without the prefix) can be used in `pixelgrove.toml`.
 
 ## Development
 
