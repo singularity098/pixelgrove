@@ -2,6 +2,8 @@
 
 An ultra-light, fast, self-hosted photo and video library written in Rust.
 
+![The Photos view: folders as cards, newest first, each with its newest photo as cover](docs/screenshots/photos.webp)
+
 - Browse folders the way Android does, plus a timeline, search, map, explore, favorites,
   trash and a File View of the real folder tree.
 - Previews are made on the fly and kept only in memory: nothing is written next to your
@@ -12,6 +14,20 @@ An ultra-light, fast, self-hosted photo and video library written in Rust.
 
 > **Status:** all v1 milestones (M0–M8) are complete. See
 > [docs/requirements.md](docs/requirements.md) and [docs/plan.md](docs/plan.md).
+
+## Screenshots
+
+| | |
+|---|---|
+| ![A folder of photos with Slideshow and Share buttons](docs/screenshots/folder.webp) | ![The photo viewer with the info panel showing date, camera, lens and location](docs/screenshots/viewer.webp) |
+| A folder, newest first; videos show their length | The viewer: zoom, copy, favorite, share, download, slideshow and info |
+| ![Explore: places, countries and cameras with cover photos](docs/screenshots/explore.webp) | ![A folder in the light theme](docs/screenshots/folder-light.webp) |
+| Explore by place, country, camera and year, worked out offline | Light theme (dark is the default) |
+| ![A shared folder as a visitor sees it, with no sign-in](docs/screenshots/share.webp) | ![PixelGrove on a phone: folders, a folder and the viewer](docs/screenshots/mobile.webp) |
+| A shared folder, as a visitor sees it (no account needed) | On a phone, where it can also be installed as an app |
+
+<sub>The pictures in these screenshots are generated landscapes, not real photos
+([how they're made](scripts/screenshots/README.md)).</sub>
 
 ## Running with Docker
 
