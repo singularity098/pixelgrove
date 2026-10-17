@@ -25,6 +25,12 @@ decisions made while reviewing them and the plan for building v1.
 3. Strong HTTP caching headers (`ETag` from path+size+mtime) so browsers keep previews.
 4. Nothing preview-related is ever written to `/config` or the media volumes.
 
+As built (M3): JPEGs are decoded at 1/2–1/8 scale straight from DCT data, which makes a
+thumbnail (shorter edge 360 px) of a 12 MP photo take ~20–30 ms uncached; the viewer
+image (longer edge 2048 px) ~230 ms. EXIF orientation is applied to previews. PNG/WebP/GIF
+are decoded fully; AVIF and small files are served as-is. Zooming in the viewer loads
+the original. Browse API calls take 1–4 ms at 100k files.
+
 ### Media
 - **v1 formats:** JPEG, PNG, WebP, GIF, AVIF; video MP4, WebM, MOV.
 - **Later:** HEIC, RAW (CR2/NEF/ARW/DNG), MKV/AVI.
@@ -160,7 +166,7 @@ A synthetic library can be generated with `scripts/gen-bench-library.py`.
 | M0 ✅ | **Scaffold** | Cargo project, Svelte app embedded via `rust-embed`, config loading, Dockerfile (multi-arch), GitHub Actions CI + GHCR publish |
 | M1 ✅ | **Indexer** | SQLite schema + migrations, parallel scanner, EXIF/video metadata, folder aggregates, watcher, periodic rescan, exclusions |
 | M2 ✅ | **Auth & users** | First-run setup, login, sessions, roles, folder restrictions, user management |
-| M3 | **Core browsing** | App shell + sidebar, dark/light theme, Photos (folders) view, folder view, preview pipeline, photo/video viewer (zoom, wheel, swipe, download, clipboard, info) |
+| M3 ✅ | **Core browsing** | App shell + sidebar, dark/light theme, Photos (folders) view, folder view, preview pipeline, photo/video viewer (zoom, wheel, swipe, download, clipboard, info) |
 | M4 | **Timeline, File View, Search** | Timeline with scrubber, File View tree + filter, global search |
 | M5 | **Favorites, Trash, Storage** | Per-user favorites, trash with restore/purge, storage display |
 | M6 | **Sharing** | Share links for files/folders, public share pages, Sharing management view |

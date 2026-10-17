@@ -1,7 +1,9 @@
 //! JSON API under `/api`.
 
 mod auth;
+mod browse;
 mod library;
+mod media;
 mod users;
 
 use axum::extract::{FromRequestParts, Request};
@@ -34,6 +36,12 @@ pub fn router() -> Router<AppState> {
         .route("/users", get(users::list).post(users::create))
         .route("/users/{id}", patch(users::update).delete(users::delete))
         .route("/library/status", get(library::status))
+        .route("/albums", get(browse::albums))
+        .route("/folders/{id}", get(browse::folder))
+        .route("/folders/{id}/media", get(browse::folder_media))
+        .route("/media/{id}", get(media::detail))
+        .route("/media/{id}/preview/{variant}", get(media::preview))
+        .route("/media/{id}/file", get(media::file))
         .fallback(not_found)
         .layer(middleware::from_fn(require_csrf_header))
 }
@@ -197,6 +205,8 @@ pub mod test_support {
 
     pub struct TestApp {
         _dir: tempfile::TempDir,
+        media: tempfile::TempDir,
+        db: Db,
         pub router: Router,
     }
 
@@ -209,20 +219,81 @@ pub mod test_support {
     impl TestApp {
         pub fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
+            let media = tempfile::tempdir().unwrap();
             let mut config = Config::with_config_dir(dir.path().to_path_buf());
-            config.media_roots = vec!["/media".into()];
+            config.media_roots = vec![media.path().to_path_buf()];
             let db = Db::open(&dir.path().join("t.db")).unwrap();
             let indexer = Indexer::new(db.clone(), &config).unwrap();
             let state = AppState {
                 config: Arc::new(config),
-                db,
+                db: db.clone(),
                 indexer,
                 login_throttle: Default::default(),
+                previews: Arc::new(crate::preview::Previews::new(1 << 20)),
             };
             Self {
                 router: router(state),
                 _dir: dir,
+                media,
+                db,
             }
+        }
+
+        pub fn media_root(&self) -> &std::path::Path {
+            self.media.path()
+        }
+
+        pub fn write_media(&self, relative: &str, bytes: &[u8]) {
+            let path = self.media_root().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+
+        /// Indexes the media root synchronously.
+        pub fn scan(&self) {
+            let root = self.media_root();
+            let roots = crate::scanner::sync_roots(&self.db, &[root.to_path_buf()]).unwrap();
+            let excludes = crate::scanner::Excludes::new(&[]).unwrap();
+            crate::scanner::scan(&self.db, roots[0].0, root, root, &excludes).unwrap();
+        }
+
+        /// The id of the folder at `relative` ("" for the root).
+        pub fn folder_id(&self, relative: &str) -> i64 {
+            let path = self.media_root().join(relative);
+            let path = path.to_str().unwrap().trim_end_matches('/');
+            self.db
+                .conn()
+                .unwrap()
+                .query_row("SELECT id FROM folders WHERE path = ?1", [path], |r| {
+                    r.get(0)
+                })
+                .unwrap()
+        }
+
+        pub fn media_id(&self, name: &str) -> i64 {
+            self.db
+                .conn()
+                .unwrap()
+                .query_row("SELECT id FROM media WHERE name = ?1", [name], |r| r.get(0))
+                .unwrap()
+        }
+
+        /// A GET returning the raw response (for binary bodies and headers).
+        pub async fn get_raw(
+            &self,
+            uri: &str,
+            cookie: &str,
+            range: Option<&str>,
+        ) -> axum::response::Response {
+            let mut request = Request::get(uri).header(header::COOKIE, cookie);
+            if let Some(range) = range {
+                request = request.header(header::RANGE, range);
+            }
+            self.router
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap()
         }
 
         /// Sends a request; `cookie` is a `name=value` session cookie.

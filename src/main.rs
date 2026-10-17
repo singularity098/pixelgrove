@@ -6,6 +6,7 @@ mod config;
 mod db;
 mod indexer;
 mod metadata;
+mod preview;
 mod scanner;
 mod server;
 #[cfg(test)]
@@ -71,7 +72,11 @@ async fn serve() -> Result<()> {
     indexer.start();
     spawn_session_cleanup(db.clone());
 
+    let previews = Arc::new(preview::Previews::new(
+        config.preview_cache_mb as usize * 1024 * 1024,
+    ));
     let app = server::router(AppState {
+        previews,
         config: Arc::new(config),
         db,
         indexer,

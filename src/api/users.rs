@@ -114,19 +114,20 @@ mod tests {
         let app = TestApp::new();
         let admin = app.setup_admin().await;
 
+        let kids = app.media_root().join("kids");
         let created = app
             .send(
                 "POST",
                 "/api/users",
                 Some(json!({
                     "username": "kid", "password": "kid-password", "role": "viewer",
-                    "folders": ["/media/kids/"]
+                    "folders": [format!("{}/", kids.display())]
                 })),
                 Some(&admin),
             )
             .await;
         assert_eq!(created.status, StatusCode::CREATED);
-        assert_eq!(created.body["folders"], json!(["/media/kids"]));
+        assert_eq!(created.body["folders"], json!([kids]));
         let id = created.body["id"].as_i64().unwrap();
 
         let dup = app

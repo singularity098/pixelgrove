@@ -73,6 +73,23 @@ h2 {
   max-width: 480px;
 }
 
+.page.wide {
+  max-width: none;
+  padding: 20px 24px 48px;
+}
+
+@media (max-width: 520px) {
+  .page.wide {
+    padding: 16px 8px 40px;
+  }
+
+  .page.wide > h2,
+  .page.wide > p,
+  .page.wide > nav {
+    padding: 0 8px;
+  }
+}
+
 .muted {
   color: var(--text-muted);
 }
@@ -169,8 +186,21 @@ button.danger {
 }
 
 button.icon {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
   background: transparent;
+}
+
+button.icon:hover {
+  background: var(--surface-2);
+}
+
+code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
 }

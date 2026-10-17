@@ -13,13 +13,19 @@ anyhow = "1.0.104"
 argon2 = "0.6.0"
 axum = "0.8.9"
 axum-extra = { version = "0.12.6", features = ["cookie"] }
+bytes = "1.12.1"
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 cookie = "0.18"
+fast_image_resize = "6.1.0"
 getrandom = "0.4.3"
 globset = "0.4.20"
 hex = "0.4.3"
+image = { version = "0.25.10", default-features = false, features = ["png", "gif", "webp"] }
 imagesize = "0.15.0"
+jpeg-decoder = "0.3.2"
+jpeg-encoder = "0.7.1"
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
+lru = "0.18.5"
 mimalloc = { version = "0.1.52", default-features = false }
 nom-exif = "3.8.0"
 notify = "8.2.0"
@@ -34,7 +40,8 @@ serde_json = "1.0.154"
 sha2 = "0.11.1"
 tokio = { version = "1.53.3", features = ["full"] }
 toml = "1.1.8"
-tower-http = { version = "0.7.1", features = ["trace", "compression-gzip", "compression-br"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["trace", "compression-gzip", "compression-br", "fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 walkdir = "2.5.0"
@@ -42,7 +49,6 @@ walkdir = "2.5.0"
 [dev-dependencies]
 http-body-util = "0.1.5"
 tempfile = "3.27.0"
-tower = { version = "0.5.3", features = ["util"] }
 
 [profile.release]
 lto = true
@@ -53,7 +59,4 @@ panic = "abort"
 # Password hashing is deliberately expensive; unoptimised it makes tests and dev
 # logins crawl.
 [profile.dev.package.argon2]
-opt-level = 3
-
-[profile.dev.package.blake2]
 opt-level = 3

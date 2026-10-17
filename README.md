@@ -2,7 +2,7 @@
 
 An ultra-light, fast, self-hosted photo and video library written in Rust.
 
-> **Status:** early development (milestone M2 — accounts). See
+> **Status:** early development (milestone M3 — browsing). See
 > [docs/requirements.md](docs/requirements.md) and [docs/plan.md](docs/plan.md).
 
 ## Running with Docker

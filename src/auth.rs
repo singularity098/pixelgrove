@@ -63,7 +63,6 @@ pub struct User {
 
 impl User {
     /// Whether this user may see `path` (a folder or file in the library).
-    #[allow(dead_code)] // Used by the browsing API (M3).
     pub fn can_access(&self, path: &Path) -> bool {
         self.folders.is_empty() || self.folders.iter().any(|f| path.starts_with(f))
     }

@@ -1,0 +1,530 @@
+//! Browsing folders ("albums") and their media. Every query is limited to the folders
+//! the signed-in user may see.
+
+use std::path::Path;
+
+use axum::Json;
+use axum::extract::{Path as UrlPath, Query, State};
+use axum::http::StatusCode;
+use rusqlite::{Connection, OptionalExtension, Row, params_from_iter};
+use serde::{Deserialize, Serialize};
+
+use super::{ApiError, ApiResult, CurrentUser};
+use crate::auth::User;
+use crate::server::AppState;
+
+/// A SQL condition limiting `column` (a folder path) to what `user` may see, with its
+/// parameters. Each allowed folder matches itself and everything below it.
+pub fn scope(user: &User, column: &str) -> (String, Vec<String>) {
+    if user.folders.is_empty() {
+        return ("1".into(), Vec::new());
+    }
+    let mut clauses = Vec::new();
+    let mut params = Vec::new();
+    for folder in &user.folders {
+        clauses.push(format!(
+            "({column} = ? OR ({column} >= ? AND {column} < ?))"
+        ));
+        params.push(folder.clone());
+        params.push(format!("{folder}/"));
+        params.push(format!("{folder}0")); // '0' sorts right after '/'
+    }
+    (format!("({})", clauses.join(" OR ")), params)
+}
+
+/// The same subtree condition, for one folder.
+fn subtree(column: &str, path: &str) -> (String, Vec<String>) {
+    (
+        format!("({column} = ? OR ({column} >= ? AND {column} < ?))"),
+        vec![path.to_string(), format!("{path}/"), format!("{path}0")],
+    )
+}
+
+#[derive(Serialize)]
+pub struct Cover {
+    id: i64,
+    kind: String,
+    v: i64,
+}
+
+#[derive(Serialize)]
+pub struct Album {
+    id: i64,
+    name: String,
+    /// Path relative to its media root, for display.
+    path: String,
+    count: i64,
+    latest_taken_at: Option<i64>,
+    cover: Option<Cover>,
+}
+
+#[derive(Deserialize)]
+pub struct Page {
+    #[serde(default)]
+    offset: i64,
+    #[serde(default = "default_limit")]
+    limit: i64,
+}
+
+fn default_limit() -> i64 {
+    100
+}
+
+impl Page {
+    fn clamped(&self) -> (i64, i64) {
+        (self.offset.max(0), self.limit.clamp(1, 500))
+    }
+}
+
+#[derive(Serialize)]
+pub struct Paged<T> {
+    items: Vec<T>,
+    total: i64,
+}
+
+/// The default Photos view: every folder that directly contains media, newest first.
+pub async fn albums(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    Query(page): Query<Page>,
+) -> ApiResult<Json<Paged<Album>>> {
+    let user = current.user;
+    let (offset, limit) = page.clamped();
+    let result = state
+        .db
+        .run(move |conn| {
+            let (where_scope, mut params) = scope(&user, "f.path");
+            let total: i64 = conn.query_row(
+                &format!(
+                    "SELECT count(*) FROM folders f WHERE f.media_count > 0 AND {where_scope}"
+                ),
+                params_from_iter(&params),
+                |r| r.get(0),
+            )?;
+            params.push(limit.to_string());
+            params.push(offset.to_string());
+            let mut stmt = conn.prepare(&format!(
+                "SELECT f.id, f.name, f.path, r.path, f.media_count, f.latest_taken_at,
+                        m.id, m.kind, m.mtime
+                 FROM folders f
+                 JOIN roots r ON r.id = f.root_id
+                 LEFT JOIN media m ON m.id = f.cover_media_id
+                 WHERE f.media_count > 0 AND {where_scope}
+                 ORDER BY f.latest_taken_at DESC, f.id DESC
+                 LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)"
+            ))?;
+            let items = stmt
+                .query_map(params_from_iter(&params), |r| {
+                    Ok(Album {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                        path: relative(&r.get::<_, String>(2)?, &r.get::<_, String>(3)?),
+                        count: r.get(4)?,
+                        latest_taken_at: r.get(5)?,
+                        cover: cover(r, 6)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            Ok(Paged { items, total })
+        })
+        .await?;
+    Ok(Json(result))
+}
+
+fn cover(row: &Row, first: usize) -> rusqlite::Result<Option<Cover>> {
+    Ok(match row.get::<_, Option<i64>>(first)? {
+        Some(id) => Some(Cover {
+            id,
+            kind: row.get(first + 1)?,
+            v: row.get(first + 2)?,
+        }),
+        None => None,
+    })
+}
+
+/// `path` relative to `root`, with the root itself shown by its directory name.
+fn relative(path: &str, root: &str) -> String {
+    match Path::new(path).strip_prefix(root) {
+        Ok(rel) if rel.as_os_str().is_empty() => root_name(root),
+        Ok(rel) => rel.to_string_lossy().into_owned(),
+        Err(_) => path.to_string(),
+    }
+}
+
+fn root_name(root: &str) -> String {
+    Path::new(root)
+        .file_name()
+        .map_or_else(|| root.to_string(), |n| n.to_string_lossy().into_owned())
+}
+
+#[derive(Serialize)]
+pub struct Crumb {
+    id: i64,
+    name: String,
+}
+
+#[derive(Serialize)]
+pub struct Subfolder {
+    id: i64,
+    name: String,
+    /// Media in this folder and everything below it.
+    count: i64,
+    latest_taken_at: Option<i64>,
+    cover: Option<Cover>,
+}
+
+#[derive(Serialize)]
+pub struct FolderDetail {
+    id: i64,
+    name: String,
+    path: String,
+    media_count: i64,
+    /// Ancestors the user may see, outermost first.
+    breadcrumbs: Vec<Crumb>,
+    /// Child folders with media somewhere below them, newest first.
+    subfolders: Vec<Subfolder>,
+}
+
+pub(super) struct FolderRow {
+    pub id: i64,
+    pub parent_id: Option<i64>,
+    pub path: String,
+    pub name: String,
+    pub root: String,
+    pub media_count: i64,
+}
+
+pub(super) fn load_folder(conn: &Connection, id: i64) -> rusqlite::Result<Option<FolderRow>> {
+    conn.query_row(
+        "SELECT f.id, f.parent_id, f.path, f.name, r.path, f.media_count
+         FROM folders f JOIN roots r ON r.id = f.root_id WHERE f.id = ?1",
+        [id],
+        |r| {
+            Ok(FolderRow {
+                id: r.get(0)?,
+                parent_id: r.get(1)?,
+                path: r.get(2)?,
+                name: r.get(3)?,
+                root: r.get(4)?,
+                media_count: r.get(5)?,
+            })
+        },
+    )
+    .optional()
+}
+
+/// Loads a folder the user may see, or a 404 (also for folders they may not see, so
+/// their existence isn't revealed).
+pub(super) fn visible_folder(conn: &Connection, user: &User, id: i64) -> ApiResult<FolderRow> {
+    match load_folder(conn, id)? {
+        Some(folder) if user.can_access(Path::new(&folder.path)) => Ok(folder),
+        _ => Err(ApiError::status(StatusCode::NOT_FOUND, "Folder not found.")),
+    }
+}
+
+pub async fn folder(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    UrlPath(id): UrlPath<i64>,
+) -> ApiResult<Json<FolderDetail>> {
+    let user = current.user;
+    let detail = state
+        .db
+        .run(move |conn| Ok(folder_detail(conn, &user, id)))
+        .await??;
+    Ok(Json(detail))
+}
+
+fn folder_detail(conn: &Connection, user: &User, id: i64) -> ApiResult<FolderDetail> {
+    let folder = visible_folder(conn, user, id)?;
+
+    let mut breadcrumbs = Vec::new();
+    let mut parent = folder.parent_id;
+    while let Some(parent_id) = parent {
+        let Some(ancestor) = load_folder(conn, parent_id)? else {
+            break;
+        };
+        if !user.can_access(Path::new(&ancestor.path)) {
+            break;
+        }
+        breadcrumbs.push(Crumb {
+            id: ancestor.id,
+            name: display_name(&ancestor),
+        });
+        parent = ancestor.parent_id;
+    }
+    breadcrumbs.reverse();
+
+    let children: Vec<(i64, String, String)> = conn
+        .prepare("SELECT id, name, path FROM folders WHERE parent_id = ?1")?
+        .query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut subfolders = Vec::new();
+    for (child_id, name, path) in children {
+        let (cond, params) = subtree("f.path", &path);
+        let (count, latest): (i64, Option<i64>) = conn.query_row(
+            &format!(
+                "SELECT coalesce(sum(f.media_count), 0), max(f.latest_taken_at)
+                 FROM folders f WHERE {cond}"
+            ),
+            params_from_iter(&params),
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if count == 0 {
+            continue;
+        }
+        let cover = conn
+            .query_row(
+                &format!(
+                    "SELECT m.id, m.kind, m.mtime FROM folders f
+                     JOIN media m ON m.id = f.cover_media_id
+                     WHERE f.media_count > 0 AND {cond}
+                     ORDER BY f.latest_taken_at DESC LIMIT 1"
+                ),
+                params_from_iter(&params),
+                |r| cover(r, 0),
+            )
+            .optional()?
+            .flatten();
+        subfolders.push(Subfolder {
+            id: child_id,
+            name,
+            count,
+            latest_taken_at: latest,
+            cover,
+        });
+    }
+    subfolders.sort_by_key(|s| std::cmp::Reverse(s.latest_taken_at));
+
+    Ok(FolderDetail {
+        id: folder.id,
+        name: display_name(&folder),
+        path: relative(&folder.path, &folder.root),
+        media_count: folder.media_count,
+        breadcrumbs,
+        subfolders,
+    })
+}
+
+fn display_name(folder: &FolderRow) -> String {
+    if folder.path == folder.root {
+        root_name(&folder.root)
+    } else {
+        folder.name.clone()
+    }
+}
+
+#[derive(Serialize)]
+pub struct MediaItem {
+    id: i64,
+    name: String,
+    kind: String,
+    /// Display dimensions (already swapped for rotated photos).
+    width: Option<u32>,
+    height: Option<u32>,
+    taken_at: i64,
+    duration_ms: Option<i64>,
+    /// Changes whenever the file does; used to version preview URLs.
+    v: i64,
+}
+
+impl MediaItem {
+    pub(super) fn from_row(r: &Row) -> rusqlite::Result<Self> {
+        let (width, height): (Option<u32>, Option<u32>) = (r.get(3)?, r.get(4)?);
+        let orientation: Option<u16> = r.get(5)?;
+        let (width, height) = if orientation.is_some_and(|o| o >= 5) {
+            (height, width)
+        } else {
+            (width, height)
+        };
+        Ok(Self {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            kind: r.get(2)?,
+            width,
+            height,
+            taken_at: r.get(6)?,
+            duration_ms: r.get(7)?,
+            v: r.get(8)?,
+        })
+    }
+}
+
+/// Columns read by [`MediaItem::from_row`], for a `media` table aliased `m`.
+pub(super) const MEDIA_ITEM_COLUMNS: &str =
+    "m.id, m.name, m.kind, m.width, m.height, m.orientation, m.taken_at, m.duration_ms, m.mtime";
+
+pub async fn folder_media(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    UrlPath(id): UrlPath<i64>,
+    Query(page): Query<Page>,
+) -> ApiResult<Json<Paged<MediaItem>>> {
+    let user = current.user;
+    let (offset, limit) = page.clamped();
+    let result = state
+        .db
+        .run(move |conn| Ok(folder_media_page(conn, &user, id, offset, limit)))
+        .await??;
+    Ok(Json(result))
+}
+
+fn folder_media_page(
+    conn: &Connection,
+    user: &User,
+    id: i64,
+    offset: i64,
+    limit: i64,
+) -> ApiResult<Paged<MediaItem>> {
+    let folder = visible_folder(conn, user, id)?;
+    let items = conn
+        .prepare(&format!(
+            "SELECT {MEDIA_ITEM_COLUMNS} FROM media m WHERE m.folder_id = ?1
+             ORDER BY m.taken_at DESC, m.id DESC LIMIT ?2 OFFSET ?3"
+        ))?
+        .query_map([folder.id, limit, offset], MediaItem::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(Paged {
+        items,
+        total: folder.media_count,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use serde_json::{Value, json};
+
+    use crate::api::test_support::TestApp;
+    use crate::testdata;
+
+    /// root/
+    ///   2023/trip/a.jpg (2023-06-15), b.jpg (2023-06-16)
+    ///   2023/notes/      (no media)
+    ///   2024/c.jpg       (2024-01-01)
+    ///   2024/deep/x/d.jpg (2022-01-01)
+    fn library(app: &TestApp) {
+        for (path, date) in [
+            ("2023/trip/a.jpg", "2023:06:15 10:00:00"),
+            ("2023/trip/b.jpg", "2023:06:16 10:00:00"),
+            ("2024/c.jpg", "2024:01:01 10:00:00"),
+            ("2024/deep/x/d.jpg", "2022:01:01 10:00:00"),
+        ] {
+            app.write_media(path, &testdata::jpeg_taken_at(date));
+        }
+        std::fs::create_dir_all(app.media_root().join("2023/notes")).unwrap();
+        app.scan();
+    }
+
+    fn names(items: &Value) -> Vec<String> {
+        items
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["name"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn albums_newest_first() {
+        let app = TestApp::new();
+        library(&app);
+        let admin = app.setup_admin().await;
+        let albums = app.send("GET", "/api/albums", None, Some(&admin)).await;
+        assert_eq!(albums.status, StatusCode::OK);
+        assert_eq!(names(&albums.body["items"]), ["2024", "trip", "x"]);
+        assert_eq!(albums.body["total"], 3);
+        assert_eq!(albums.body["items"][1]["path"], "2023/trip");
+        assert_eq!(albums.body["items"][1]["count"], 2);
+        assert!(albums.body["items"][1]["cover"]["id"].is_i64());
+
+        let page = app
+            .send("GET", "/api/albums?offset=1&limit=1", None, Some(&admin))
+            .await;
+        assert_eq!(names(&page.body["items"]), ["trip"]);
+    }
+
+    #[tokio::test]
+    async fn folder_detail_and_media() {
+        let app = TestApp::new();
+        library(&app);
+        let admin = app.setup_admin().await;
+        let root_id = app.folder_id("");
+        let root = app
+            .send(
+                "GET",
+                &format!("/api/folders/{root_id}"),
+                None,
+                Some(&admin),
+            )
+            .await;
+        // Subfolders with media below them, newest first; "notes" has none.
+        assert_eq!(names(&root.body["subfolders"]), ["2024", "2023"]);
+        assert_eq!(
+            root.body["subfolders"][0]["count"], 2,
+            "counts include nested media"
+        );
+
+        let trip_id = app.folder_id("2023/trip");
+        let trip = app
+            .send(
+                "GET",
+                &format!("/api/folders/{trip_id}"),
+                None,
+                Some(&admin),
+            )
+            .await;
+        assert_eq!(names(&trip.body["breadcrumbs"]).len(), 2);
+        assert_eq!(trip.body["breadcrumbs"][1]["name"], "2023");
+        let media = app
+            .send(
+                "GET",
+                &format!("/api/folders/{trip_id}/media"),
+                None,
+                Some(&admin),
+            )
+            .await;
+        assert_eq!(names(&media.body["items"]), ["b.jpg", "a.jpg"]);
+        assert_eq!(media.body["items"][0]["width"], 4);
+    }
+
+    #[tokio::test]
+    async fn folder_limits_are_enforced() {
+        let app = TestApp::new();
+        library(&app);
+        let admin = app.setup_admin().await;
+        let limited = format!("{}/2023", app.media_root().display());
+        let response = app
+            .send(
+                "POST",
+                "/api/users",
+                Some(json!({
+                    "username": "kid", "password": "kid-password", "role": "viewer",
+                    "folders": [limited]
+                })),
+                Some(&admin),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::CREATED);
+        let kid = app.login("kid", "kid-password").await.cookie.unwrap();
+
+        let albums = app.send("GET", "/api/albums", None, Some(&kid)).await;
+        assert_eq!(names(&albums.body["items"]), ["trip"]);
+
+        let other = app.folder_id("2024");
+        for uri in [
+            format!("/api/folders/{other}"),
+            format!("/api/folders/{other}/media"),
+        ] {
+            let response = app.send("GET", &uri, None, Some(&kid)).await;
+            assert_eq!(response.status, StatusCode::NOT_FOUND, "{uri}");
+        }
+
+        // Breadcrumbs stop at the user's top folder.
+        let trip = app.folder_id("2023/trip");
+        let detail = app
+            .send("GET", &format!("/api/folders/{trip}"), None, Some(&kid))
+            .await;
+        assert_eq!(names(&detail.body["breadcrumbs"]), ["2023"]);
+    }
+}

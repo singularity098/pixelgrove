@@ -11,6 +11,7 @@ use crate::auth::LoginThrottle;
 use crate::config::Config;
 use crate::db::Db;
 use crate::indexer::Indexer;
+use crate::preview::Previews;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -20,6 +21,7 @@ pub struct AppState {
     pub db: Db,
     pub indexer: Indexer,
     pub login_throttle: Arc<LoginThrottle>,
+    pub previews: Arc<Previews>,
 }
 
 pub fn router(state: AppState) -> Router {
