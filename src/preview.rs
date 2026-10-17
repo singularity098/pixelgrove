@@ -177,7 +177,9 @@ fn decode_jpeg(path: &Path, variant: Variant) -> Result<Pixels> {
     let (channels, data) = match info.pixel_format {
         jpeg_decoder::PixelFormat::RGB24 => (3, data),
         jpeg_decoder::PixelFormat::L8 => (1, data),
-        jpeg_decoder::PixelFormat::L16 => (1, data.chunks_exact(2).map(|p| p[0]).collect()),
+        jpeg_decoder::PixelFormat::L16 => {
+            (1, data.as_chunks::<2>().0.iter().map(|p| p[0]).collect())
+        }
         jpeg_decoder::PixelFormat::CMYK32 => (3, cmyk_to_rgb(&data)),
     };
     Ok(Pixels {
@@ -190,7 +192,9 @@ fn decode_jpeg(path: &Path, variant: Variant) -> Result<Pixels> {
 
 fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
     // jpeg-decoder returns Adobe CMYK already inverted, so each channel is (1 - ink).
-    cmyk.chunks_exact(4)
+    cmyk.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| {
             let k = u16::from(p[3]);
             [p[0], p[1], p[2]].map(|c| (u16::from(c) * k / 255) as u8)
