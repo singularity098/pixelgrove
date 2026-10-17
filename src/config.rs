@@ -25,6 +25,8 @@ pub struct Config {
     pub preview_cache_mb: u64,
     /// Hours between full rescans of the media roots.
     pub rescan_interval_hours: u64,
+    /// File/directory name globs that are never indexed (hidden entries are always skipped).
+    pub exclude: Vec<String>,
 }
 
 impl Config {
@@ -36,6 +38,10 @@ impl Config {
             public_url: None,
             preview_cache_mb: 256,
             rescan_interval_hours: 6,
+            exclude: crate::scanner::DEFAULT_EXCLUDES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         }
     }
 
@@ -77,6 +83,9 @@ impl Config {
         if let Some(hours) = file.rescan_interval_hours {
             self.rescan_interval_hours = hours;
         }
+        if let Some(exclude) = file.exclude {
+            self.exclude = exclude;
+        }
     }
 
     fn apply_env(&mut self, env: impl Fn(&str) -> Option<String>) -> Result<()> {
@@ -101,6 +110,14 @@ impl Config {
                 .parse()
                 .with_context(|| format!("invalid PIXELGROVE_RESCAN_INTERVAL_HOURS: {hours}"))?;
         }
+        if let Some(exclude) = env("PIXELGROVE_EXCLUDE") {
+            self.exclude = exclude
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+        }
         Ok(())
     }
 }
@@ -114,6 +131,7 @@ struct FileConfig {
     public_url: Option<String>,
     preview_cache_mb: Option<u64>,
     rescan_interval_hours: Option<u64>,
+    exclude: Option<Vec<String>>,
 }
 
 impl FileConfig {
@@ -171,6 +189,7 @@ mod tests {
         assert_eq!(config.public_url.as_deref(), Some("https://env.example"));
         assert_eq!(config.preview_cache_mb, 64);
         assert_eq!(config.rescan_interval_hours, 12);
+        assert!(config.exclude.contains(&"@eaDir".to_string()));
     }
 
     #[test]
@@ -180,12 +199,14 @@ mod tests {
         let config = Config::load_from(env_from(&[
             ("PIXELGROVE_CONFIG_DIR", dir_str),
             ("PIXELGROVE_MEDIA_ROOTS", "/media/a:/data/b"),
+            ("PIXELGROVE_EXCLUDE", "*.tmp, Thumbs"),
         ]))
         .unwrap();
         assert_eq!(
             config.media_roots,
             vec![PathBuf::from("/media/a"), PathBuf::from("/data/b")]
         );
+        assert_eq!(config.exclude, ["*.tmp", "Thumbs"]);
     }
 
     #[test]
