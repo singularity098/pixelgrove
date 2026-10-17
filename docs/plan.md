@@ -143,7 +143,7 @@ A synthetic 100k-file library will be generated for benchmarks in CI/local testi
 
 | # | Milestone | Contents |
 |---|---|---|
-| M0 | **Scaffold** | Cargo project, Svelte app embedded via `rust-embed`, config loading, Dockerfile (multi-arch), GitHub Actions CI + GHCR publish |
+| M0 ✅ | **Scaffold** | Cargo project, Svelte app embedded via `rust-embed`, config loading, Dockerfile (multi-arch), GitHub Actions CI + GHCR publish |
 | M1 | **Indexer** | SQLite schema + migrations, parallel scanner, EXIF/video metadata, folder aggregates, watcher, periodic rescan, exclusions |
 | M2 | **Auth & users** | First-run setup, login, sessions, roles, folder restrictions, user management |
 | M3 | **Core browsing** | App shell + sidebar, dark/light theme, Photos (folders) view, folder view, preview pipeline, photo/video viewer (zoom, wheel, swipe, download, clipboard, info) |
