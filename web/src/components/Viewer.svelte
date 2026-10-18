@@ -219,7 +219,8 @@
 
   function onpointerdown(event: PointerEvent) {
     menu = false;
-    if (item.kind !== 'image' || event.button !== 0) return;
+    // Buttons on the photo (previous/next) need their own clicks, so don't capture.
+    if (item.kind !== 'image' || event.button !== 0 || (event.target as Element).closest('button')) return;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     gestureActive = true;

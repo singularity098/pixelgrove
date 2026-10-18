@@ -28,6 +28,9 @@
     const map = L.map(container, { zoomControl: true, worldCopyJump: true }).setView([20, 0], 2);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
+      // OpenStreetMap blocks tile requests without a Referer, and the app otherwise
+      // sends none. Send just this server's address (never the page path).
+      referrerPolicy: 'strict-origin',
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
     const layer = L.layerGroup().addTo(map);

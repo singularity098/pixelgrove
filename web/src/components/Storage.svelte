@@ -2,7 +2,7 @@
   import { get } from '../lib/api';
   import { formatBytes } from '../lib/media.svelte';
 
-  type Volume = { roots: string[]; total: number; free: number; used: number };
+  type Volume = { paths: string[]; total: number; free: number; used: number };
   let volumes: Volume[] = $state([]);
 
   $effect(() => {
@@ -13,11 +13,12 @@
   });
 </script>
 
-{#each volumes as volume (volume.roots.join())}
+{#each volumes as volume (volume.paths.join())}
   {@const fraction = volume.total ? volume.used / volume.total : 0}
-  <div class="storage" title={volume.roots.join(', ')}>
+  <div class="storage" title={volume.paths.join(', ')}>
     <div class="label small">
-      <span>Storage</span>
+      <!-- With several volumes, name each by its folder. -->
+      <span class="name">{volumes.length > 1 ? volume.paths[0].split('/').filter(Boolean).at(-1) : 'Storage'}</span>
       <span class="muted">{Math.round(fraction * 100)}%</span>
     </div>
     <div class="bar" role="meter" aria-label="Storage used" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(fraction * 100)}>
@@ -28,6 +29,12 @@
 {/each}
 
 <style>
+  .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .storage {
     padding: 10px 14px 4px;
   }
@@ -35,6 +42,7 @@
   .label {
     display: flex;
     justify-content: space-between;
+    gap: 8px;
     margin-bottom: 6px;
   }
 
