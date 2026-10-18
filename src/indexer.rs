@@ -310,6 +310,14 @@ impl Indexer {
             let Some((_, root)) = roots.iter().find(|(_, r)| path.starts_with(r)) else {
                 continue;
             };
+            // An ignore marker appearing or going away changes its whole folder.
+            let marker = path
+                .file_name()
+                .is_some_and(|n| scanner::IGNORE_MARKERS.iter().any(|m| n == *m));
+            let path = match (marker, path.parent()) {
+                (true, Some(parent)) => parent.to_path_buf(),
+                _ => path,
+            };
             let relative = path.strip_prefix(root).unwrap_or(&path);
             if relative
                 .iter()
@@ -317,7 +325,7 @@ impl Indexer {
             {
                 continue;
             }
-            let dir = if path.is_dir() {
+            let dir = if marker || path.is_dir() {
                 path
             } else {
                 path.parent().map(Path::to_path_buf).unwrap_or(path)
@@ -462,6 +470,17 @@ mod tests {
             "watcher should index the new file"
         );
 
+        std::fs::write(media.path().join("new/.nomedia"), b"").unwrap();
+        assert!(
+            wait_for(|| media_count(&db) == 1).await,
+            "a new .nomedia hides its folder"
+        );
+        std::fs::remove_file(media.path().join("new/.nomedia")).unwrap();
+        assert!(
+            wait_for(|| media_count(&db) == 2).await,
+            "removing it brings the folder back"
+        );
+
         std::fs::remove_dir_all(media.path().join("album")).unwrap();
         assert!(
             wait_for(|| media_count(&db) == 1).await,
@@ -489,5 +508,10 @@ mod tests {
         ]);
         let dirs: Vec<PathBuf> = targets.into_iter().map(|t| t.2).collect();
         assert_eq!(dirs, [root.join("a")]);
+
+        // Ignore markers are hidden files, but adding or removing one rescans its folder.
+        let targets = indexer.scan_targets(vec![root.join("a/b/.nomedia")]);
+        let dirs: Vec<PathBuf> = targets.into_iter().map(|t| t.2).collect();
+        assert_eq!(dirs, [root.join("a/b")]);
     }
 }

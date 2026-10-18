@@ -63,6 +63,15 @@ fn as_millis<S: serde::Serializer>(d: &Duration, s: S) -> Result<S::Ok, S::Error
 #[derive(Clone)]
 pub struct Excludes(GlobSet);
 
+/// A folder holding one of these files is left out, with everything below it (like
+/// Android's `.nomedia`).
+pub const IGNORE_MARKERS: [&str; 2] = [".nomedia", ".ignore"];
+
+/// True if `dir` contains an ignore marker.
+pub fn is_ignored_dir(dir: &Path) -> bool {
+    IGNORE_MARKERS.iter().any(|m| dir.join(m).is_file())
+}
+
 impl Excludes {
     pub fn new(patterns: &[String]) -> Result<Self> {
         let mut builder = GlobSetBuilder::new();
@@ -141,6 +150,7 @@ pub fn scan(
         && fs_tree.dirs.len() <= 1
         && fs_tree.files.is_empty()
         && !db_tree.media.is_empty()
+        && !is_ignored_dir(root)
     {
         tracing::warn!(
             root = %root.display(),
@@ -220,12 +230,23 @@ fn walk(root: &Path, target: &Path, excludes: &Excludes) -> Result<FsTree> {
         }
         return Ok(tree);
     }
+    // Inside an ignored folder (the target or one of its parents up to the root):
+    // nothing here belongs in the library.
+    if target
+        .ancestors()
+        .take_while(|a| a.starts_with(root))
+        .any(is_ignored_dir)
+    {
+        return Ok(tree);
+    }
     let walker = WalkDir::new(target)
         .follow_links(false)
         .sort_by_file_name()
         .into_iter()
         .filter_entry(|e| {
-            e.depth() == 0 || !excludes.is_excluded(&e.file_name().to_string_lossy())
+            e.depth() == 0
+                || (!excludes.is_excluded(&e.file_name().to_string_lossy())
+                    && !(e.file_type().is_dir() && is_ignored_dir(e.path())))
         });
     // Directory path → index in `dirs`, for the parents of files.
     let mut dir_index: HashMap<PathBuf, usize> = HashMap::new();
@@ -657,6 +678,46 @@ mod tests {
             )
             .unwrap();
         assert_eq!((count, latest, cover.as_str()), (2, 1_686_906_000, "b.jpg"));
+    }
+
+    #[test]
+    fn folders_with_ignore_markers_are_left_out() {
+        let fx = Fixture::new();
+        fx.write("keep/a.jpg", &testdata::jpeg_with_exif());
+        fx.write("private/b.jpg", &testdata::jpeg_with_exif());
+        fx.write("private/deeper/c.jpg", &testdata::jpeg_with_exif());
+        fx.write("dev/d.jpg", &testdata::jpeg_with_exif());
+        fx.scan();
+        assert_eq!(fx.query::<i64>("SELECT count(*) FROM media"), [4]);
+
+        // Adding markers removes those folders and everything below them.
+        fx.write("private/.nomedia", b"");
+        fx.write("dev/.ignore", b"");
+        let stats = fx.scan();
+        assert_eq!(stats.media_removed, 3);
+        let names: Vec<String> = fx.query("SELECT name FROM media");
+        assert_eq!(names, ["a.jpg"]);
+        let folders: Vec<String> = fx.query("SELECT name FROM folders WHERE parent_id IS NOT NULL");
+        assert_eq!(folders, ["keep"]);
+
+        // A rescan of just a subfolder of an ignored folder adds nothing back.
+        fx.scan_at(&fx.root().join("private/deeper"));
+        assert_eq!(fx.query::<i64>("SELECT count(*) FROM media"), [1]);
+
+        // Removing the marker brings them back.
+        fs::remove_file(fx.root().join("private/.nomedia")).unwrap();
+        fx.scan();
+        assert_eq!(fx.query::<i64>("SELECT count(*) FROM media"), [3]);
+    }
+
+    #[test]
+    fn ignore_marker_at_the_root_clears_the_library() {
+        let fx = Fixture::new();
+        fx.write("a.jpg", &testdata::jpeg_with_exif());
+        fx.scan();
+        fx.write(".nomedia", b"");
+        fx.scan();
+        assert_eq!(fx.query::<i64>("SELECT count(*) FROM media"), [0]);
     }
 
     #[test]

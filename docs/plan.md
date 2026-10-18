@@ -97,6 +97,7 @@ the original. Browse API calls take 1–4 ms at 100k files.
   configuration can't be removed there. Folders that overlap an existing one are refused.
 - Live filesystem watching (`notify`) **plus** a periodic full rescan (default every 6 h; important for NFS/SMB where watching is unreliable).
 - Incremental: files are only re-read when path, size or mtime change.
+- Folders containing a `.nomedia` or `.ignore` file are skipped with everything below them.
 - Hidden folders skipped; configurable exclude patterns (defaults include `@eaDir`, `.thumbnails`,
   `.pixelgrove-trash`); symlinks not followed.
 

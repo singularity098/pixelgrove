@@ -65,6 +65,9 @@ counts and the last scan, and has **Rescan now**.
 PixelGrove watches folders for changes and also rescans everything every 6 hours, since
 change notifications don't work on network shares (NFS/SMB). Hidden folders and
 `@eaDir`, `#recycle`, `#snapshot` and `lost+found` are skipped; symlinks are not followed.
+To leave a folder out, put an empty `.nomedia` or `.ignore` file in it: that folder and
+everything below it disappear from PixelGrove (the files are untouched), and come back
+if you delete the file.
 If a mounted folder goes missing or empty (say a NAS share isn't mounted yet), its
 index is kept rather than wiped.
 
