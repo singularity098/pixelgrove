@@ -44,6 +44,13 @@
     debounce = setTimeout(() => setParam('filter', input.trim() || null, true), 200);
   }
 
+  function clearFilter(event: MouseEvent) {
+    clearTimeout(debounce);
+    input = '';
+    setParam('filter', null, true);
+    ((event.currentTarget as HTMLElement).previousElementSibling as HTMLInputElement | null)?.focus();
+  }
+
   $effect(() => {
     const q = filter;
     if (!q) {
@@ -69,13 +76,19 @@
       </nav>
       <h2>{detail?.name ?? 'File View'}</h2>
     </div>
-    <input
-      class="filter"
-      type="search"
-      placeholder="Filter folders…"
-      aria-label="Filter folders"
-      bind:value={input}
-      oninput={onInput} />
+    <div class="filter">
+      <input
+        type="search"
+        placeholder="Filter folders…"
+        aria-label="Filter folders"
+        bind:value={input}
+        oninput={onInput} />
+      {#if input}
+        <button type="button" class="clear" aria-label="Clear filter" onclick={clearFilter}>
+          <Icon name="close" size={18} />
+        </button>
+      {/if}
+    </div>
   </div>
   {#if error}<p class="error">{error}</p>{/if}
 
@@ -165,8 +178,35 @@
   }
 
   .filter {
+    position: relative;
+    width: 100%;
     max-width: 280px;
+  }
+
+  .filter input {
     margin: 0;
+    padding-right: 40px;
+  }
+
+  .clear {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: var(--text-muted);
+  }
+
+  .clear:hover {
+    background: var(--surface-2);
+    color: var(--text);
   }
 
   .rows {

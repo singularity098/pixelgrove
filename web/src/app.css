@@ -230,6 +230,11 @@ textarea {
   border-radius: 10px;
 }
 
+/* Search boxes draw their own clear button. */
+input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
+
 input:focus-visible,
 textarea:focus-visible,
 button:focus-visible {

@@ -94,7 +94,8 @@
 
   @media (max-width: 520px) {
     .grid {
-      grid-template-columns: repeat(3, 1fr);
+      /* Picked with the header's columns button (lib/columns.ts). */
+      grid-template-columns: repeat(var(--phone-columns, 3), 1fr);
       gap: 2px;
     }
 

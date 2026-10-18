@@ -6,6 +6,7 @@
   import { signedIn, signOut } from '../lib/session.svelte';
   import Icon, { type IconName } from './Icon.svelte';
   import Storage from './Storage.svelte';
+  import ColumnsButton from './ColumnsButton.svelte';
   import ThemeMenu from './ThemeMenu.svelte';
 
   let { user, children }: { user: User; children: Snippet } = $props();
@@ -53,6 +54,75 @@
 
   const sidebarVisible = $derived(isNarrow ? drawerOpen : pinned);
 
+  // On phones the drawer follows a finger: swipe right from the left edge to pull it
+  // out, swipe left to push it away. `dragOffset` is how far it sits from fully open
+  // (0 open, -width closed) while a finger is on it.
+  const EDGE = 32;
+  let sidebar: HTMLElement | undefined = $state();
+  let dragOffset: number | null = $state(null);
+
+  $effect(() => {
+    if (!isNarrow) return;
+    let swipe: { startX: number; startY: number; base: number; width: number; lastX: number; lastT: number; speed: number; horizontal: boolean } | null = null;
+
+    const onStart = (e: TouchEvent) => {
+      swipe = null;
+      if (e.touches.length !== 1 || !sidebar) return;
+      const target = e.target as Element;
+      // The viewer, slideshow, dialogs and the map have their own swipes.
+      if (target.closest('[aria-modal="true"], dialog, .leaflet-container')) return;
+      const { clientX: x, clientY: y } = e.touches[0];
+      if (!drawerOpen && x > EDGE) return;
+      const width = sidebar.offsetWidth;
+      swipe = { startX: x, startY: y, base: drawerOpen ? 0 : -width, width, lastX: x, lastT: e.timeStamp, speed: 0, horizontal: false };
+    };
+
+    const onMove = (e: TouchEvent) => {
+      if (!swipe) return;
+      const { clientX: x, clientY: y } = e.touches[0];
+      const dx = x - swipe.startX;
+      if (!swipe.horizontal) {
+        const dy = y - swipe.startY;
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        // Mostly vertical: it's a scroll, leave it alone.
+        if (Math.abs(dy) > Math.abs(dx)) {
+          swipe = null;
+          return;
+        }
+        swipe.horizontal = true;
+      }
+      e.preventDefault();
+      if (e.timeStamp > swipe.lastT) {
+        swipe.speed = (x - swipe.lastX) / (e.timeStamp - swipe.lastT);
+        swipe.lastX = x;
+        swipe.lastT = e.timeStamp;
+      }
+      dragOffset = Math.min(0, Math.max(-swipe.width, swipe.base + dx));
+    };
+
+    const onEnd = () => {
+      if (swipe?.horizontal && dragOffset !== null) {
+        // A flick decides by its direction; a slow drag by how far out the drawer is.
+        drawerOpen = Math.abs(swipe.speed) > 0.3 ? swipe.speed > 0 : dragOffset > -swipe.width / 2;
+      }
+      swipe = null;
+      dragOffset = null;
+    };
+
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onEnd);
+    window.addEventListener('touchcancel', onEnd);
+    return () => {
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+      window.removeEventListener('touchcancel', onEnd);
+    };
+  });
+
+  const dragProgress = $derived(dragOffset === null || !sidebar ? null : 1 + dragOffset / sidebar.offsetWidth);
+
   function toggleSidebar() {
     if (isNarrow) {
       drawerOpen = !drawerOpen;
@@ -82,6 +152,11 @@
     searchInput?.blur();
     searchOpen = false;
     navigate(`/search?q=${encodeURIComponent(q)}`);
+  }
+
+  function clearSearch() {
+    searchText = '';
+    searchInput?.focus();
   }
 
   function openSearch() {
@@ -137,20 +212,35 @@
         placeholder="Search your library"
         aria-label="Search your library"
         onblur={() => (searchOpen = false)} />
+      {#if searchText}
+        <!-- pointerdown keeps the focus in the box (blurring would close it on phones). -->
+        <button type="button" class="clear" aria-label="Clear search" onpointerdown={(e) => e.preventDefault()} onclick={clearSearch}>
+          <Icon name="close" size={18} />
+        </button>
+      {/if}
     </form>
     <div class="spacer"></div>
     <button class="icon search-toggle" onclick={openSearch} aria-label="Search"><Icon name="search" /></button>
+    <ColumnsButton />
     <ThemeMenu />
     <button class="icon" onclick={signOut} aria-label="Sign out" title="Sign out ({user.username})">
       <Icon name="signOut" />
     </button>
   </header>
 
-  {#if isNarrow && drawerOpen}
-    <button class="scrim" aria-label="Close sidebar" onclick={() => (drawerOpen = false)}></button>
+  {#if isNarrow && (drawerOpen || dragProgress !== null)}
+    <button class="scrim" aria-label="Close sidebar" style:opacity={dragProgress} onclick={() => (drawerOpen = false)}></button>
   {/if}
 
-  <nav class="sidebar" class:open={sidebarVisible} class:drawer={isNarrow} aria-label="Main" inert={!sidebarVisible}>
+  <nav
+    bind:this={sidebar}
+    class="sidebar"
+    class:open={sidebarVisible}
+    class:drawer={isNarrow}
+    class:dragging={dragOffset !== null}
+    style:transform={dragOffset === null ? undefined : `translateX(${dragOffset}px)`}
+    aria-label="Main"
+    inert={!sidebarVisible}>
     <ul>
       {#each library as item (item.href)}
         <li>
@@ -248,6 +338,25 @@
     outline: none;
   }
 
+  .clear {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    margin-right: -8px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: var(--text-muted);
+  }
+
+  .clear:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+
   .search-toggle {
     display: none;
   }
@@ -300,8 +409,13 @@
     background: var(--surface);
   }
 
-  .sidebar.drawer.open {
+  .sidebar.drawer.open,
+  .sidebar.dragging {
     box-shadow: 0 0 40px rgb(0 0 0 / 0.4);
+  }
+
+  .sidebar.dragging {
+    transition: none;
   }
 
   .scrim {

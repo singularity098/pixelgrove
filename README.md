@@ -10,7 +10,8 @@ An ultra-light, fast, self-hosted photo and video library written in Rust.
   photos, and `/config` holds just a small database (about 20 MB for 100k files).
 - Share a photo or folder with a link that needs no account.
 - Slideshows, nine colour themes (dark, light, AMOLED black, Dracula, Tokyo Night and the
-  four Catppuccin flavours), works on phones and installs as an app.
+  four Catppuccin flavours), works on phones (swipe from the left edge for the menu,
+  2, 3 or 4 photos per row) and installs as an app.
 - Video thumbnails made on the server by a small bundled FFmpeg, so they appear quickly
   for any video (including iPhone HEVC), and are kept in memory only.
 - One small static binary (plus FFmpeg) in a `scratch` Docker image, for `linux/amd64`
