@@ -1,7 +1,8 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
+  import Thumb from '../components/Thumb.svelte';
   import { del, post } from '../lib/api';
-  import { formatDate, PagedList } from '../lib/media.svelte';
+  import { formatDate, PagedList, type MediaUrls } from '../lib/media.svelte';
   import { onVisible } from '../lib/router.svelte';
 
   type Entry = {
@@ -21,7 +22,14 @@
 
   const daysLeft = (entry: Entry) => Math.max(0, Math.ceil((entry.expires_at - Date.now() / 1000) / 86400));
   const thumb = (e: Entry) => `/api/trash/${e.id}/preview/thumb?v=${e.v}`;
-  const file = (e: Entry) => `/api/trash/${e.id}/file?v=${e.v}`;
+  // Videos in the trash: frames are grabbed from the trashed file.
+  const trashUrls: MediaUrls = {
+    thumb: (m) => `/api/trash/${m.id}/preview/thumb?v=${m.v}`,
+    large: (m) => `/api/trash/${m.id}/preview/large?v=${m.v}`,
+    file: (m) => `/api/trash/${m.id}/file?v=${m.v}`,
+    download: () => null,
+    detail: (id) => `/trash/${id}`,
+  };
 
   async function act(entry: Entry, action: 'restore' | 'delete') {
     if (action === 'delete' && !confirm(`Delete “${entry.name}” permanently? This can't be undone.`)) return;
@@ -74,7 +82,7 @@
       <li class="card">
         <div class="thumb">
           {#if entry.kind === 'video'}
-            <video src="{file(entry)}#t=0.5" preload="metadata" muted playsinline></video>
+            <Thumb media={{ id: entry.id, kind: 'video', v: entry.v }} urls={trashUrls} />
           {:else}
             <img src={thumb(entry)} alt="" loading="lazy" />
           {/if}
@@ -128,8 +136,8 @@
     background: var(--surface-2);
   }
 
-  .thumb img,
-  .thumb video {
+  .thumb :global(img),
+  .thumb :global(.placeholder) {
     width: 100%;
     height: 100%;
     object-fit: cover;

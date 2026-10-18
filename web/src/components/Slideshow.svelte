@@ -4,6 +4,7 @@
   import { formatDate, libraryUrls, type MediaItem, type MediaSource, type MediaUrls } from '../lib/media.svelte';
   import { INTERVALS, saveSlideshowSettings, slideshowSettings as settings } from '../lib/slideshow.svelte';
   import Icon from './Icon.svelte';
+  import { releaseOnDestroy } from '../lib/video';
 
   /**
    * A full-screen slideshow over `source`, loading more of it as it goes. Photos are
@@ -352,6 +353,7 @@
           onloadeddata={(e) => videoReady(e.currentTarget)}
           onended={() => playing && next()}
           onerror={skipBroken}
+          use:releaseOnDestroy
           transition:fade={{ duration: 700 }}></video>
       {:else}
         <img class="slide" src={urls.large(current)} alt={current.name} draggable="false" transition:fade={{ duration: 700 }} />

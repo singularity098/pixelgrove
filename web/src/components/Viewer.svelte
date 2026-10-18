@@ -13,6 +13,7 @@
   import Icon from './Icon.svelte';
   import ShareDialog from './ShareDialog.svelte';
   import Slideshow from './Slideshow.svelte';
+  import { releaseOnDestroy } from '../lib/video';
 
   let {
     items,
@@ -398,7 +399,7 @@
       {#key item.id}
         {#if item.kind === 'video'}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={src} controls autoplay playsinline></video>
+          <video src={src} controls autoplay playsinline use:releaseOnDestroy></video>
         {:else}
           <img
             {src}

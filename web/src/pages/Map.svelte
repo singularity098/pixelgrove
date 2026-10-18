@@ -74,8 +74,11 @@
     // The selection panel and window resizes change the map's size; Leaflet must be told.
     const resize = new ResizeObserver(() => map.invalidateSize());
     resize.observe(container);
+    // The page may be gone by the time the points arrive.
+    let alive = true;
     get<Point[]>('/map/points').then(
       (points) => {
+        if (!alive) return;
         total = points.length;
         index.load(
           points.map(([id, lat, lon, t, v, video]) => ({
@@ -93,11 +96,15 @@
         }
         render();
       },
-      (e) => (error = (e as Error).message),
+      (e) => {
+        if (alive) error = (e as Error).message;
+      },
     );
 
     return () => {
+      alive = false;
       resize.disconnect();
+      map.stop();
       map.remove();
     };
   });

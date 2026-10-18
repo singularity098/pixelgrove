@@ -1,6 +1,7 @@
 <script lang="ts">
   import { formatDuration, libraryUrls, type MediaItem, type MediaUrls } from '../lib/media.svelte';
   import Icon from './Icon.svelte';
+  import Thumb from './Thumb.svelte';
 
   let {
     items,
@@ -13,7 +14,7 @@
   {#each items as item, index (item.id)}
     <button class="tile" onclick={() => onopen(index)} aria-label="Open {item.name}">
       {#if item.kind === 'video'}
-        <video src="{urls.file(item)}#t=0.5" preload="metadata" muted playsinline disablepictureinpicture tabindex="-1"></video>
+        <Thumb media={item} {urls} />
         <span class="badge"><Icon name="play" size={12} />{formatDuration(item.duration_ms)}</span>
       {:else}
         <img src={urls.thumb(item)} alt="" loading="lazy" decoding="async" />
@@ -44,8 +45,8 @@
     outline-offset: -3px;
   }
 
-  img,
-  video {
+  .tile :global(img),
+  .tile :global(.placeholder) {
     display: block;
     width: 100%;
     height: 100%;
@@ -54,8 +55,7 @@
     transition: transform 0.15s ease;
   }
 
-  .tile:hover img,
-  .tile:hover video {
+  .tile:hover :global(img) {
     transform: scale(1.03);
   }
 
