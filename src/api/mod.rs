@@ -5,6 +5,7 @@ mod browse;
 mod explore;
 mod favorites;
 mod files;
+mod hidden;
 mod library;
 mod media;
 mod public;
@@ -44,6 +45,10 @@ pub fn router() -> Router<AppState> {
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
         .route("/auth/password", post(auth::change_password))
+        .route(
+            "/auth/show-hidden",
+            axum::routing::put(hidden::set_show_hidden),
+        )
         .route("/users", get(users::list).post(users::create))
         .route("/users/{id}", patch(users::update).delete(users::delete))
         .route("/library/status", get(library::status))
@@ -68,6 +73,14 @@ pub fn router() -> Router<AppState> {
             axum::routing::put(favorites::add).delete(favorites::remove),
         )
         .route("/media/{id}/trash", post(trash::trash_media))
+        .route(
+            "/media/{id}/hidden",
+            axum::routing::put(hidden::hide_media).delete(hidden::unhide_media),
+        )
+        .route(
+            "/folders/{id}/hidden",
+            axum::routing::put(hidden::hide_folder).delete(hidden::unhide_folder),
+        )
         .route("/favorites", get(favorites::list))
         .route("/trash", get(trash::list).delete(trash::empty))
         .route("/trash/{id}", axum::routing::delete(trash::delete_forever))

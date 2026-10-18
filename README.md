@@ -108,6 +108,22 @@ be restored from **Trash** for 30 days, then it is deleted for good. Trash needs
 media mounted read-write; on a read-only mount (`:ro`) PixelGrove says so and leaves the
 file alone. Favorites are per user and stored only in PixelGrove's database.
 
+## Hiding photos and folders
+
+The eye button in the viewer (or **h**) hides a photo or video, and **Hide** on a folder
+page hides the folder with everything below it. Hidden items disappear everywhere:
+Photos, Timeline, search, Explore, Map, slideshows, folder covers and share links.
+
+- **Admins** hide things for everyone. Only admins can see them again or unhide them.
+- **Other users** hide things just for themselves; nobody else is affected.
+- **View-only** accounts can't hide anything.
+
+**Show hidden** at the bottom of the sidebar (off by default, remembered per user) brings
+back what you may see: your own hidden items, and for admins everything. Hidden items
+are then dimmed with an eye-off mark, and the viewer and folder page offer **Unhide**.
+Share links never include hidden items, and a link to something hidden afterwards stops
+working. Hiding only affects PixelGrove; files are never touched.
+
 ## Sharing
 
 Editors and admins can share a photo or video (from the viewer) or a folder with

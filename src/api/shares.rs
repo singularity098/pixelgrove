@@ -9,7 +9,9 @@ use axum::http::StatusCode;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::browse::{Cover, cover, relative, subtree, visible_folder};
+use super::browse::{
+    Cover, cover, not_in_hidden_folders, relative, subtree, summarize, visible_folder,
+};
 use super::{ApiError, ApiResult, CurrentUser};
 use crate::auth::{Role, User};
 use crate::server::AppState;
@@ -86,18 +88,12 @@ fn view(conn: &Connection, state: &AppState, share: Share) -> anyhow::Result<Sha
         ("media", name, path, cover, Some(folder_id))
     } else {
         let folder_path = share.folder_path.clone().unwrap_or_default();
-        let (cond, params) = subtree("f.path", &folder_path);
-        let cover = conn
-            .query_row(
-                &format!(
-                    "SELECT m.id, m.kind, m.mtime FROM folders f JOIN media m ON m.id = f.cover_media_id
-                     WHERE f.media_count > 0 AND {cond} ORDER BY f.latest_taken_at DESC LIMIT 1"
-                ),
-                rusqlite::params_from_iter(&params),
-                |r| cover(r, 0),
-            )
-            .optional()?
-            .flatten();
+        // The cover visitors see: nothing hidden for the link.
+        let hidden = crate::auth::Hidden::for_share(conn, Some(share.created_by))?;
+        let (below, mut params) = subtree("f.path", &folder_path);
+        let (visible, visible_params) = not_in_hidden_folders(&hidden, "f.path");
+        params.extend(visible_params);
+        let (_, _, cover) = summarize(conn, &format!("{below} AND {visible}"), &params, &hidden)?;
         let row: Option<(i64, String)> = conn
             .query_row(
                 "SELECT f.id, r.path FROM folders f JOIN roots r ON r.id = f.root_id WHERE f.path = ?1",

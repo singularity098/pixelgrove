@@ -84,9 +84,15 @@ pub(super) fn load(conn: &Connection, id: i64) -> rusqlite::Result<Option<MediaR
 pub(super) async fn visible(state: &AppState, user: User, id: i64) -> ApiResult<MediaRow> {
     state
         .db
-        .run(move |conn| load(conn, id).map_err(Into::into))
+        .run(move |conn| {
+            let Some(m) = load(conn, id)? else {
+                return Ok(None);
+            };
+            let allowed = user.can_access(Path::new(&m.folder_path))
+                && !user.hidden.hides_media(conn, m.id, &m.folder_path)?;
+            Ok(allowed.then_some(m))
+        })
         .await?
-        .filter(|m| user.can_access(Path::new(&m.folder_path)))
         .ok_or_else(|| ApiError::status(StatusCode::NOT_FOUND, "Not found."))
 }
 
@@ -113,6 +119,10 @@ pub struct MediaDetail {
     description: Option<String>,
     /// Whether the signed-in user has favorited it.
     favorite: bool,
+    /// Shown only because "show hidden" is on: "photo" (hidden itself) or "folder"
+    /// (in a hidden folder).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hidden: Option<&'static str>,
     v: i64,
 }
 
@@ -122,7 +132,15 @@ pub async fn detail(
     UrlPath(id): UrlPath<i64>,
 ) -> ApiResult<Json<MediaDetail>> {
     let user_id = current.user.id;
+    let marks = current.user.hidden.clone();
     let m = visible(&state, current.user, id).await?;
+    let hidden = if marks.marked_media.contains(&m.id) {
+        Some("photo")
+    } else if marks.marks_folder(&m.folder_path) {
+        Some("folder")
+    } else {
+        None
+    };
     let favorite = state
         .db
         .run(move |conn| super::favorites::is_favorite(conn, user_id, id))
@@ -152,6 +170,7 @@ pub async fn detail(
         longitude: m.longitude,
         description: m.description,
         favorite,
+        hidden,
         v: m.mtime,
     }))
 }

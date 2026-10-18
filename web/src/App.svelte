@@ -38,6 +38,8 @@
 {:else if session.current.status === 'signed-in'}
   {@const user = session.current.user}
   <Shell {user}>
+    <!-- Turning "show hidden" on or off reloads the page's lists. -->
+    {#key user.show_hidden}
     {#if folderId !== null}
       {#key folderId}
         <Folder id={folderId} />
@@ -78,5 +80,6 @@
     {:else}
       <Photos />
     {/if}
+    {/key}
   </Shell>
 {/if}

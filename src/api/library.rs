@@ -29,13 +29,14 @@ pub async fn status(
         .run(move |conn| {
             // Counts cover only the folders this user may see.
             let (scope, params) = super::browse::scope(&user, "f.path");
+            let visible = super::browse::not_hidden(&user.hidden, "m.id");
             Ok(conn.query_row(
                 &format!(
                     "SELECT (SELECT count(*) FROM folders f WHERE {scope}),
                             (SELECT coalesce(sum(m.kind = 'image'), 0) FROM media m
-                             JOIN folders f ON f.id = m.folder_id WHERE {scope}),
+                             JOIN folders f ON f.id = m.folder_id WHERE {scope} AND {visible}),
                             (SELECT coalesce(sum(m.kind = 'video'), 0) FROM media m
-                             JOIN folders f ON f.id = m.folder_id WHERE {scope})"
+                             JOIN folders f ON f.id = m.folder_id WHERE {scope} AND {visible})"
                 ),
                 rusqlite::params_from_iter(params.iter().chain(&params).chain(&params)),
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),

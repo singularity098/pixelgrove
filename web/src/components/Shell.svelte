@@ -2,12 +2,25 @@
   import type { Snippet } from 'svelte';
   import type { User } from '../lib/api';
   import { link, navigate, route } from '../lib/router.svelte';
-  import { signOut } from '../lib/session.svelte';
+  import { put, type User as UserType } from '../lib/api';
+  import { signedIn, signOut } from '../lib/session.svelte';
   import Icon, { type IconName } from './Icon.svelte';
   import Storage from './Storage.svelte';
   import ThemeMenu from './ThemeMenu.svelte';
 
   let { user, children }: { user: User; children: Snippet } = $props();
+
+  // View-only accounts have nothing hidden of their own to show.
+  const canHide = $derived(user.role !== 'viewer');
+  let toggling = $state(false);
+  async function toggleShowHidden() {
+    toggling = true;
+    try {
+      signedIn(await put<UserType>('/auth/show-hidden', { show: !user.show_hidden }));
+    } finally {
+      toggling = false;
+    }
+  }
 
   const SIDEBAR_KEY = 'pixelgrove-sidebar';
   const narrow = window.matchMedia('(max-width: 900px)');
@@ -149,6 +162,13 @@
       {/each}
     </ul>
     <div class="bottom">
+    {#if canHide}
+      <button class="show-hidden" role="switch" aria-checked={user.show_hidden} disabled={toggling} onclick={toggleShowHidden}>
+        <Icon name={user.show_hidden ? 'eye' : 'eyeOff'} />
+        <span>Show hidden</span>
+        <span class="switch" class:on={user.show_hidden}></span>
+      </button>
+    {/if}
     <Storage />
     <ul class="secondary">
       {#each account as item (item.href)}
@@ -318,8 +338,63 @@
     font-size: 0.95rem;
   }
 
-  .sidebar a:hover {
+  .sidebar a:hover,
+  .show-hidden:hover {
     background: var(--surface-2);
+  }
+
+  .show-hidden {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: calc(100% - 16px);
+    margin: 0 8px 4px;
+    padding: 9px 14px;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: var(--text);
+    font-size: 0.95rem;
+    text-align: left;
+  }
+
+  .show-hidden span:not(.switch) {
+    flex: 1;
+    white-space: nowrap;
+  }
+
+  .switch {
+    flex: none;
+  }
+
+  .switch {
+    position: relative;
+    width: 34px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--border);
+    transition: background 0.15s;
+  }
+
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--text);
+    transition: transform 0.15s;
+  }
+
+  .switch.on {
+    background: var(--accent);
+  }
+
+  .switch.on::after {
+    transform: translateX(14px);
+    background: var(--accent-contrast);
   }
 
   .sidebar a.active {

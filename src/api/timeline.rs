@@ -6,7 +6,7 @@ use axum::extract::{Query, State};
 use rusqlite::params_from_iter;
 use serde::{Deserialize, Serialize};
 
-use super::browse::{MEDIA_ITEM_COLUMNS, MediaItem, scope};
+use super::browse::{MEDIA_ITEM_COLUMNS, MediaItem, not_hidden, scope};
 use super::{ApiResult, CurrentUser};
 use crate::server::AppState;
 
@@ -42,7 +42,7 @@ pub async fn timeline(
         .db
         .run(move |conn| {
             let (where_scope, mut params) = scope(&user, "f.path");
-            let mut conditions = vec![where_scope];
+            let mut conditions = vec![where_scope, not_hidden(&user.hidden, "m.id")];
             match (query.before, query.before_id) {
                 (Some(before), Some(id)) => {
                     conditions.push("(m.taken_at < ? OR (m.taken_at = ? AND m.id < ?))".into());
@@ -69,6 +69,7 @@ pub async fn timeline(
                 .collect::<rusqlite::Result<_>>()?;
             let more = items.len() as i64 > limit;
             items.truncate(limit as usize);
+            MediaItem::mark_hidden(&mut items, &user.hidden);
             Ok(TimelinePage { items, more })
         })
         .await?;
@@ -95,8 +96,9 @@ pub async fn months(
                 .prepare(&format!(
                     "SELECT strftime('%Y-%m', m.taken_at, 'unixepoch') AS month, count(*)
                      FROM media m JOIN folders f ON f.id = m.folder_id
-                     WHERE {where_scope}
-                     GROUP BY month ORDER BY month DESC"
+                     WHERE {where_scope} AND {}
+                     GROUP BY month ORDER BY month DESC",
+                    not_hidden(&user.hidden, "m.id")
                 ))?
                 .query_map(params_from_iter(&params), |r| {
                     Ok(Month {

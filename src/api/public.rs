@@ -12,10 +12,12 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use super::browse::{
-    MEDIA_ITEM_COLUMNS, MediaItem, Paged, Subfolder, load_folder, media_page, subfolders_of,
+    MEDIA_ITEM_COLUMNS, MediaItem, Paged, Subfolder, load_folder, media_page,
+    not_in_hidden_folders, subfolders_of,
 };
 use super::media::{FileRef, MediaRow, Versioned, file_response, load, preview_response};
 use super::{ApiError, ApiResult, ClientIp, is_https};
+use crate::auth::Hidden;
 use crate::server::AppState;
 use crate::shares::{self, Share};
 
@@ -35,7 +37,15 @@ async fn resolve(state: &AppState, token: &str, jar: &CookieJar) -> ApiResult<(S
     let token = token.to_string();
     let (share, secret) = state
         .db
-        .run(move |conn| Ok((shares::by_token(conn, &token)?, shares::secret(conn)?)))
+        .run(move |conn| {
+            let share = shares::by_token(conn, &token)?;
+            // A link to something hidden since (by an admin or its creator) stops working.
+            let share = match share {
+                Some(s) if shared_item_hidden(conn, &s)? => None,
+                other => other,
+            };
+            Ok((share, shares::secret(conn)?))
+        })
         .await?;
     let share = share
         .filter(|s| !s.is_expired(crate::auth::now()))
@@ -45,6 +55,23 @@ async fn resolve(state: &AppState, token: &str, jar: &CookieJar) -> ApiResult<(S
             .get(&shares::cookie_name(&share))
             .is_some_and(|c| c.value() == shares::unlock_value(&secret, &share));
     Ok((share, unlocked))
+}
+
+/// Whether the shared photo or folder itself is hidden for the share.
+fn shared_item_hidden(conn: &Connection, share: &Share) -> anyhow::Result<bool> {
+    let hidden = Hidden::for_share(conn, Some(share.created_by))?;
+    if let Some(path) = &share.folder_path {
+        return Ok(hidden.hides_folder(path));
+    }
+    let Some(media) = share
+        .media_id
+        .map(|id| load(conn, id))
+        .transpose()?
+        .flatten()
+    else {
+        return Ok(false);
+    };
+    hidden.hides_media(conn, media.id, &media.folder_path)
 }
 
 async fn unlocked(state: &AppState, token: &str, jar: &CookieJar) -> ApiResult<Share> {
@@ -236,6 +263,7 @@ pub async fn folder(
     let offset = query.offset.max(0);
     let limit = query.limit.clamp(1, 500);
     let display_path = relative.to_string_lossy().into_owned();
+    let created_by = share.created_by;
     let result = state
         .db
         .run(move |conn| {
@@ -251,14 +279,21 @@ pub async fn folder(
             else {
                 return Ok(None);
             };
+            // Nothing hidden by an admin or by the link's creator.
+            let hidden = Hidden::for_share(conn, Some(created_by))?;
+            if hidden.hides_folder(&folder.path) {
+                return Ok(None);
+            }
             let subfolders = if offset == 0 {
-                subfolders_of(conn, folder.id)?
+                subfolders_of(conn, folder.id, &hidden)?
             } else {
                 Vec::new()
             };
             // Everything below the shared folder is in the share.
-            let recursive = query.recursive.then(|| ("1".to_string(), Vec::new()));
-            let media = media_page(conn, &folder, recursive, offset, limit)?;
+            let recursive = query
+                .recursive
+                .then(|| not_in_hidden_folders(&hidden, "f.path"));
+            let media = media_page(conn, &folder, recursive, &hidden, offset, limit)?;
             Ok(Some(SharedFolder {
                 name: folder.name,
                 path: display_path,
@@ -273,10 +308,23 @@ pub async fn folder(
 
 /// Media in the share: the shared item itself, or anything below the shared folder.
 async fn shared_media(state: &AppState, share: &Share, id: i64) -> ApiResult<MediaRow> {
-    let media = state
+    let created_by = share.created_by;
+    let (media, hidden) = state
         .db
-        .run(move |conn| load(conn, id).map_err(Into::into))
-        .await?
+        .run(move |conn| {
+            let Some(media) = load(conn, id)? else {
+                return Ok((None, false));
+            };
+            let hidden = Hidden::for_share(conn, Some(created_by))?.hides_media(
+                conn,
+                media.id,
+                &media.folder_path,
+            )?;
+            Ok((Some(media), hidden))
+        })
+        .await?;
+    let media = media
+        .filter(|_| !hidden)
         .ok_or_else(|| ApiError::status(StatusCode::NOT_FOUND, "Not found."))?;
     let included = share.media_id == Some(id) || share.covers_folder(&media.folder_path);
     if included {

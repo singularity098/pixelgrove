@@ -119,6 +119,33 @@
   }
 
   let trashing = $state(false);
+  // Hiding: admins hide for everyone, others just for themselves.
+  const isAdmin = $derived(session.current.status === 'signed-in' && session.current.user.role === 'admin');
+  const showingHidden = $derived(session.current.status === 'signed-in' && session.current.user.show_hidden);
+  let hiding = $state(false);
+  async function toggleHidden() {
+    if (!detail || hiding || detail.hidden === 'folder') return;
+    const d = detail;
+    hiding = true;
+    try {
+      if (d.hidden === 'photo') {
+        await del(`/media/${d.id}/hidden`);
+        d.hidden = undefined;
+        flash('No longer hidden');
+      } else {
+        await put(`/media/${d.id}/hidden`);
+        flash(isAdmin ? 'Hidden from everyone' : 'Hidden (only for you)');
+        // With "show hidden" on it stays, marked; otherwise it leaves the list.
+        if (showingHidden) d.hidden = 'photo';
+        else onremoved(d.id);
+      }
+    } catch (e) {
+      flash((e as Error).message);
+    } finally {
+      hiding = false;
+    }
+  }
+
   async function moveToTrash() {
     if (trashing || !confirm(`Move “${item.name}” to the trash? You can restore it for 30 days.`)) return;
     trashing = true;
@@ -298,6 +325,9 @@
       case 'Delete':
         if (canEdit) moveToTrash();
         break;
+      case 'h':
+        if (canEdit) toggleHidden();
+        break;
       default:
         return;
     }
@@ -347,7 +377,7 @@
     {/if}
     <div class="title">
       <div class="name">{item.name}</div>
-      <div class="sub">{formatDate(item.taken_at, true)}{total > 1 ? ` · ${index + 1} of ${total.toLocaleString()}` : ''}</div>
+      <div class="sub">{formatDate(item.taken_at, true)}{total > 1 ? ` · ${index + 1} of ${total.toLocaleString()}` : ''}{detail?.hidden ? ' · Hidden' : ''}</div>
     </div>
     {#if canEdit}
       <button class="icon" style="order: 4" class:on={detail?.favorite} onclick={toggleFavorite} disabled={!detail} aria-pressed={detail?.favorite ?? false} aria-label={detail?.favorite ? 'Remove from favorites' : 'Add to favorites'} title={detail?.favorite ? 'Remove from favorites' : 'Add to favorites'}>
@@ -378,7 +408,16 @@
         </button>
       {/if}
       {#if canEdit}
-        <button class="icon" style="order: 9" onclick={moveToTrash} disabled={trashing} aria-label="Move to trash" title="Move to trash (Delete)">
+        <button
+          class="icon"
+          style="order: 9"
+          onclick={toggleHidden}
+          disabled={!detail || hiding || detail.hidden === 'folder'}
+          aria-label={detail?.hidden ? 'Unhide' : 'Hide'}
+          title={detail?.hidden === 'folder' ? 'In a hidden folder (unhide the folder)' : detail?.hidden ? 'Unhide (h)' : isAdmin ? 'Hide from everyone (h)' : 'Hide (h)'}>
+          <Icon name={detail?.hidden ? 'eye' : 'eyeOff'} /><span class="label">{detail?.hidden ? 'Unhide' : 'Hide'}</span>
+        </button>
+        <button class="icon" style="order: 10" onclick={moveToTrash} disabled={trashing} aria-label="Move to trash" title="Move to trash (Delete)">
           <Icon name="trash" /><span class="label">Move to trash</span>
         </button>
       {/if}
@@ -676,7 +715,7 @@
   }
 
   .toolbar button.more {
-    order: 10;
+    order: 11;
   }
 
   @media (max-width: 700px) {

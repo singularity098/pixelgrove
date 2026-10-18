@@ -13,6 +13,8 @@ export interface Album {
   count: number;
   latest_taken_at: number | null;
   cover: Cover | null;
+  /** Shown only because "show hidden" is on. */
+  hidden?: boolean;
 }
 
 export interface Subfolder {
@@ -21,6 +23,7 @@ export interface Subfolder {
   count: number;
   latest_taken_at: number | null;
   cover: Cover | null;
+  hidden?: boolean;
 }
 
 export interface FolderDetail {
@@ -30,6 +33,8 @@ export interface FolderDetail {
   media_count: number;
   breadcrumbs: { id: number; name: string }[];
   subfolders: Subfolder[];
+  /** Shown only because "show hidden" is on: this folder is hidden, or one above it. */
+  hidden?: 'this' | 'parent';
 }
 
 export interface MediaItem {
@@ -42,6 +47,8 @@ export interface MediaItem {
   duration_ms: number | null;
   size: number;
   v: number;
+  /** Shown only because "show hidden" is on. */
+  hidden?: boolean;
 }
 
 /** Anything the viewer can page through. */
@@ -69,9 +76,10 @@ export interface TreeFolder {
   total_count: number;
   subfolder_count: number;
   latest_taken_at: number | null;
+  hidden?: boolean;
 }
 
-export interface MediaDetail extends MediaItem {
+export interface MediaDetail extends Omit<MediaItem, 'hidden'> {
   folder_id?: number;
   /** Absent for share links. */
   path?: string;
@@ -84,6 +92,8 @@ export interface MediaDetail extends MediaItem {
   longitude?: number | null;
   description: string | null;
   favorite?: boolean;
+  /** Shown only because "show hidden" is on: hidden itself, or in a hidden folder. */
+  hidden?: 'photo' | 'folder';
 }
 
 export interface Paged<T> {

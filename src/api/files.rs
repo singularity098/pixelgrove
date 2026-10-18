@@ -4,10 +4,12 @@ use std::path::Path;
 
 use axum::Json;
 use axum::extract::{Path as UrlPath, State};
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::Connection;
 use serde::Serialize;
 
-use super::browse::{load_folder, relative, subtree, visible_folder};
+use super::browse::{
+    load_folder, not_in_hidden_folders, relative, subtree, summarize, visible_folder,
+};
 use super::{ApiResult, CurrentUser};
 use crate::auth::User;
 use crate::server::AppState;
@@ -23,30 +25,50 @@ pub struct TreeFolder {
     total_count: i64,
     subfolder_count: i64,
     latest_taken_at: Option<i64>,
+    /// Shown only because "show hidden" is on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    hidden: bool,
 }
 
-fn tree_folder(conn: &Connection, id: i64) -> anyhow::Result<Option<TreeFolder>> {
+/// A folder in the tree, counting only what `user` sees (or `None` if it's hidden).
+fn tree_folder(conn: &Connection, user: &User, id: i64) -> anyhow::Result<Option<TreeFolder>> {
     let Some(folder) = load_folder(conn, id)? else {
         return Ok(None);
     };
-    let (cond, params) = subtree("f.path", &folder.path);
-    let (total_count, latest): (i64, Option<i64>) = conn.query_row(
-        &format!(
-            "SELECT coalesce(sum(f.media_count), 0), max(f.latest_taken_at) FROM folders f WHERE {cond}"
-        ),
-        params_from_iter(&params),
-        |r| Ok((r.get(0)?, r.get(1)?)),
+    if user.hidden.hides_folder(&folder.path) {
+        return Ok(None);
+    }
+    let (below, mut params) = subtree("f.path", &folder.path);
+    let (visible, visible_params) = not_in_hidden_folders(&user.hidden, "f.path");
+    params.extend(visible_params);
+    let (total_count, latest, _) = summarize(
+        conn,
+        &format!("{below} AND {visible}"),
+        &params,
+        &user.hidden,
     )?;
-    let subfolder_count: i64 = conn.query_row(
-        "SELECT count(*) FROM folders WHERE parent_id = ?1",
-        [id],
-        |r| r.get(0),
-    )?;
+    let media_count = if user.hidden.media_rule.is_none() {
+        folder.media_count
+    } else {
+        summarize(
+            conn,
+            "f.id = CAST(? AS INTEGER)",
+            &[folder.id.to_string()],
+            &user.hidden,
+        )?
+        .0
+    };
+    let subfolder_count = conn
+        .prepare("SELECT path FROM folders WHERE parent_id = ?1")?
+        .query_map([id], |r| r.get::<_, String>(0))?
+        .filter(|path| path.as_ref().is_ok_and(|p| !user.hidden.hides_folder(p)))
+        .count() as i64;
     Ok(Some(TreeFolder {
         id: folder.id,
         name: super::browse::display_name(&folder),
+        hidden: user.hidden.marks_folder(&folder.path),
         path: relative(&folder.path, &folder.root),
-        media_count: folder.media_count,
+        media_count,
         total_count,
         subfolder_count,
         latest_taken_at: latest,
@@ -66,7 +88,7 @@ pub async fn tops(
             let ids = top_ids(conn, &user)?;
             let mut folders = Vec::new();
             for id in ids {
-                folders.extend(tree_folder(conn, id)?);
+                folders.extend(tree_folder(conn, &user, id)?);
             }
             Ok(folders)
         })
@@ -117,7 +139,7 @@ fn children_of(conn: &Connection, user: &User, id: i64) -> ApiResult<Vec<TreeFol
     let mut folders = Vec::new();
     for (child, path) in ids {
         if user.can_access(Path::new(&path)) {
-            folders.extend(tree_folder(conn, child)?);
+            folders.extend(tree_folder(conn, user, child)?);
         }
     }
     Ok(folders)

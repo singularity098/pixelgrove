@@ -99,7 +99,7 @@
     <ul class="rows">
       {#each folders as folder (folder.id)}
         <li>
-          <a class="row" href="/files/{folder.id}" onclick={link}>
+          <a class="row" class:hidden-item={folder.hidden} href="/files/{folder.id}" onclick={link}>
             <span class="icon"><Icon name="folder" /></span>
             <span class="main">
               <span class="name">{folder.name}</span>
@@ -119,7 +119,7 @@
       {#if media}
         {#each media.items as item, index (item.id)}
           <li>
-            <button class="row" onclick={() => openViewer(media.items[index].id)}>
+            <button class="row" class:hidden-item={item.hidden} onclick={() => openViewer(media.items[index].id)}>
               <span class="icon"><Icon name={item.kind === 'video' ? 'play' : 'photos'} /></span>
               <span class="main"><span class="name">{item.name}</span></span>
               <span class="muted small">{formatBytes(item.size)}</span>
@@ -200,6 +200,10 @@
     text-align: left;
     text-decoration: none;
     font: inherit;
+  }
+
+  .row.hidden-item {
+    opacity: 0.5;
   }
 
   .row:hover {

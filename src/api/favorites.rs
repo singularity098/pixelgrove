@@ -6,7 +6,7 @@ use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use rusqlite::{Connection, params, params_from_iter};
 
-use super::browse::{MEDIA_ITEM_COLUMNS, MediaItem, Page, Paged, scope};
+use super::browse::{MEDIA_ITEM_COLUMNS, MediaItem, Page, Paged, not_hidden, scope};
 use super::{ApiResult, CurrentUser};
 use crate::auth::Role;
 use crate::server::AppState;
@@ -79,7 +79,8 @@ pub async fn list(
             let from = format!(
                 "FROM favorites fav JOIN media m ON m.id = fav.media_id
                  JOIN folders f ON f.id = m.folder_id
-                 WHERE fav.user_id = CAST(? AS INTEGER) AND {where_scope}"
+                 WHERE fav.user_id = CAST(? AS INTEGER) AND {where_scope} AND {}",
+                not_hidden(&user.hidden, "m.id")
             );
             let total: i64 = conn.query_row(
                 &format!("SELECT count(*) {from}"),
@@ -88,7 +89,7 @@ pub async fn list(
             )?;
             params.push(limit.to_string());
             params.push(offset.to_string());
-            let items = conn
+            let mut items: Vec<MediaItem> = conn
                 .prepare(&format!(
                     "SELECT {MEDIA_ITEM_COLUMNS} {from}
                      ORDER BY m.taken_at DESC, m.id DESC
@@ -96,6 +97,7 @@ pub async fn list(
                 ))?
                 .query_map(params_from_iter(&params), MediaItem::from_row)?
                 .collect::<rusqlite::Result<_>>()?;
+            MediaItem::mark_hidden(&mut items, &user.hidden);
             Ok(Paged { items, total })
         })
         .await?;

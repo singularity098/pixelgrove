@@ -60,6 +60,112 @@ pub struct User {
     pub created_at: i64,
     /// Folders this user is limited to; empty means the whole library.
     pub folders: Vec<String>,
+    /// Whether hidden photos and folders are shown (marked as hidden).
+    pub show_hidden: bool,
+    /// What this user doesn't see, or sees marked as hidden.
+    #[serde(skip)]
+    pub hidden: Hidden,
+}
+
+/// Hidden photos and folders as they apply to one user (or one share link). An admin
+/// hides things for everyone, and only admins can show or unhide them; other users
+/// hide things just for themselves.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Hidden {
+    /// Folders left out, with everything below them.
+    pub folders: Vec<String>,
+    /// A condition on `hidden.user_id` selecting the hidden-media rows that apply, or
+    /// `None` when there are none (so queries can skip the check).
+    pub media_rule: Option<String>,
+    /// With "show hidden" on: what is shown but marked as hidden.
+    pub marked_folders: Vec<String>,
+    pub marked_media: std::collections::HashSet<i64>,
+}
+
+impl Hidden {
+    /// What `user_id` (with `role`) doesn't see. Admins' hides are for everyone and
+    /// apply to other users always; "show hidden" reveals a user's own hides, and for
+    /// admins everyone's.
+    pub fn load(conn: &Connection, user_id: i64, role: Role, show_hidden: bool) -> Result<Self> {
+        let own = format!("user_id = {user_id}");
+        let applies = match (role == Role::Admin, show_hidden) {
+            (true, true) => None,
+            (false, true) => Some("user_id IS NULL".to_string()),
+            (_, false) => Some(format!("(user_id IS NULL OR {own})")),
+        };
+        let mut hidden = match &applies {
+            Some(rule) => Self::from_rule(conn, rule)?,
+            None => Self::default(),
+        };
+        if show_hidden {
+            // Shown but marked: what would otherwise be left out.
+            let all = Self::from_rule(conn, &format!("(user_id IS NULL OR {own})"))?;
+            hidden.marked_folders = all.folders;
+            if all.media_rule.is_some() {
+                hidden.marked_media = conn
+                    .prepare(&format!(
+                        "SELECT media_id FROM hidden WHERE media_id IS NOT NULL AND (user_id IS NULL OR {own})"
+                    ))?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+            }
+        }
+        Ok(hidden)
+    }
+
+    /// For a share link: everything its creator doesn't see with "show hidden" off.
+    pub fn for_share(conn: &Connection, creator: Option<i64>) -> Result<Self> {
+        match creator {
+            Some(id) => Self::from_rule(conn, &format!("(user_id IS NULL OR user_id = {id})")),
+            None => Self::from_rule(conn, "user_id IS NULL"),
+        }
+    }
+
+    fn from_rule(conn: &Connection, rule: &str) -> Result<Self> {
+        let folders = conn
+            .prepare(&format!(
+                "SELECT DISTINCT folder_path FROM hidden WHERE folder_path IS NOT NULL AND {rule}"
+            ))?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let any_media: bool = conn.query_row(
+            &format!("SELECT EXISTS (SELECT 1 FROM hidden WHERE media_id IS NOT NULL AND {rule})"),
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(Self {
+            folders,
+            media_rule: any_media.then(|| rule.to_string()),
+            ..Self::default()
+        })
+    }
+
+    /// Whether `path` (a folder) is in a hidden folder.
+    pub fn hides_folder(&self, path: &str) -> bool {
+        self.folders.iter().any(|f| Path::new(path).starts_with(f))
+    }
+
+    /// Whether a photo or video (in folder `folder_path`) is hidden.
+    pub fn hides_media(&self, conn: &Connection, media_id: i64, folder_path: &str) -> Result<bool> {
+        if self.hides_folder(folder_path) {
+            return Ok(true);
+        }
+        let Some(rule) = &self.media_rule else {
+            return Ok(false);
+        };
+        Ok(conn.query_row(
+            &format!("SELECT EXISTS (SELECT 1 FROM hidden WHERE media_id = ?1 AND {rule})"),
+            [media_id],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Whether `path` (a folder) is shown marked as hidden.
+    pub fn marks_folder(&self, path: &str) -> bool {
+        self.marked_folders
+            .iter()
+            .any(|f| Path::new(path).starts_with(f))
+    }
 }
 
 impl User {
@@ -203,7 +309,7 @@ pub fn create_first_admin(
 pub fn get_user(conn: &Connection, id: i64) -> Result<Option<User>> {
     let row = conn
         .query_row(
-            "SELECT id, username, role, disabled, created_at FROM users WHERE id = ?1",
+            "SELECT id, username, role, disabled, created_at, show_hidden FROM users WHERE id = ?1",
             [id],
             |r| {
                 Ok((
@@ -212,20 +318,26 @@ pub fn get_user(conn: &Connection, id: i64) -> Result<Option<User>> {
                     r.get::<_, String>(2)?,
                     r.get::<_, bool>(3)?,
                     r.get::<_, i64>(4)?,
+                    r.get::<_, bool>(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, username, role, disabled, created_at)) = row else {
+    let Some((id, username, role, disabled, created_at, show_hidden)) = row else {
         return Ok(None);
     };
+    let role = Role::parse(&role)?;
+    // View-only accounts have nothing of their own hidden, so nothing to show.
+    let show_hidden = show_hidden && role != Role::Viewer;
     Ok(Some(User {
         id,
         username,
-        role: Role::parse(&role)?,
+        role,
         disabled,
         created_at,
         folders: folders_of(conn, id)?,
+        show_hidden,
+        hidden: Hidden::load(conn, id, role, show_hidden)?,
     }))
 }
 

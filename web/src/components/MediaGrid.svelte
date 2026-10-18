@@ -12,13 +12,14 @@
 
 <div class="grid">
   {#each items as item, index (item.id)}
-    <button class="tile" onclick={() => onopen(index)} aria-label="Open {item.name}">
+    <button class="tile" class:hidden-item={item.hidden} onclick={() => onopen(index)} aria-label="Open {item.name}{item.hidden ? ' (hidden)' : ''}">
       {#if item.kind === 'video'}
         <Thumb media={item} {urls} />
         <span class="badge"><Icon name="play" size={12} />{formatDuration(item.duration_ms)}</span>
       {:else}
         <img src={urls.thumb(item)} alt="" loading="lazy" decoding="async" />
       {/if}
+      {#if item.hidden}<span class="hidden-badge" title="Hidden"><Icon name="eyeOff" size={14} /></span>{/if}
     </button>
   {/each}
 </div>
@@ -57,6 +58,24 @@
 
   .tile:hover :global(img) {
     transform: scale(1.03);
+  }
+
+  .hidden-item :global(img),
+  .hidden-item :global(.placeholder) {
+    opacity: 0.4;
+  }
+
+  .hidden-badge {
+    position: absolute;
+    left: 6px;
+    top: 6px;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    color: #fff;
+    background: rgb(0 0 0 / 0.6);
   }
 
   .badge {

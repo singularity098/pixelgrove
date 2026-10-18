@@ -7,6 +7,8 @@ export interface User {
   disabled: boolean;
   created_at: number;
   folders: string[];
+  /** Hidden photos and folders are shown (marked) instead of left out. */
+  show_hidden: boolean;
 }
 
 export class ApiError extends Error {

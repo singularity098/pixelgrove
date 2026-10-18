@@ -6,7 +6,9 @@ use axum::extract::{Query, State};
 use rusqlite::{Connection, params_from_iter};
 use serde::{Deserialize, Serialize};
 
-use super::browse::{Cover, MEDIA_ITEM_COLUMNS, MediaItem, Paged, cover, relative, scope};
+use super::browse::{
+    Cover, MEDIA_ITEM_COLUMNS, MediaItem, Paged, cover, not_hidden, relative, scope, summarize,
+};
 use super::{ApiResult, CurrentUser};
 use crate::auth::User;
 use crate::server::AppState;
@@ -113,7 +115,7 @@ pub fn matching_folders(
          LIMIT CAST(? AS INTEGER)",
         conditions.join(" AND ")
     );
-    let hits = conn
+    let mut hits: Vec<FolderHit> = conn
         .prepare(&sql)?
         .query_map(params_from_iter(&params), |r| {
             Ok(FolderHit {
@@ -125,6 +127,19 @@ pub fn matching_folders(
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
+    // The stored count and cover may include hidden photos.
+    if user.hidden.media_rule.is_some() {
+        for hit in &mut hits {
+            let (count, _, cover) = summarize(
+                conn,
+                "f.id = CAST(? AS INTEGER)",
+                &[hit.id.to_string()],
+                &user.hidden,
+            )?;
+            hit.count = count;
+            hit.cover = cover;
+        }
+    }
     Ok(hits)
 }
 
@@ -136,13 +151,13 @@ fn matching_media(
     limit: i64,
 ) -> anyhow::Result<Paged<MediaItem>> {
     let (where_scope, mut params) = scope(user, "f.path");
-    // Folders are only needed to apply a user's folder limits.
-    let join = if user.folders.is_empty() {
+    // Folders are only needed to apply folder limits and hidden folders.
+    let join = if user.folders.is_empty() && user.hidden.folders.is_empty() {
         ""
     } else {
         "JOIN folders f ON f.id = m.folder_id"
     };
-    let mut conditions = vec![where_scope];
+    let mut conditions = vec![where_scope, not_hidden(&user.hidden, "m.id")];
     for pattern in patterns {
         conditions.push("m.search_text LIKE ? ESCAPE '\\'".into());
         params.push(pattern.clone());
@@ -155,7 +170,7 @@ fn matching_media(
     )?;
     params.push(limit.to_string());
     params.push(offset.to_string());
-    let items = conn
+    let mut items: Vec<MediaItem> = conn
         .prepare(&format!(
             "SELECT {MEDIA_ITEM_COLUMNS} {from}
              ORDER BY m.taken_at DESC, m.id DESC
@@ -163,6 +178,7 @@ fn matching_media(
         ))?
         .query_map(params_from_iter(&params), MediaItem::from_row)?
         .collect::<rusqlite::Result<_>>()?;
+    MediaItem::mark_hidden(&mut items, &user.hidden);
     Ok(Paged { items, total })
 }
 

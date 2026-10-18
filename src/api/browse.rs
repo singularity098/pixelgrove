@@ -10,26 +10,109 @@ use rusqlite::{Connection, OptionalExtension, Row, params_from_iter};
 use serde::{Deserialize, Serialize};
 
 use super::{ApiError, ApiResult, CurrentUser};
-use crate::auth::User;
+use crate::auth::{Hidden, User};
 use crate::server::AppState;
 
 /// A SQL condition limiting `column` (a folder path) to what `user` may see, with its
-/// parameters. Each allowed folder matches itself and everything below it.
+/// parameters: inside the folders they're limited to (each with everything below it),
+/// and not in a hidden folder.
 pub fn scope(user: &User, column: &str) -> (String, Vec<String>) {
+    let (hidden, mut params) = not_in_hidden_folders(&user.hidden, column);
     if user.folders.is_empty() {
+        return (hidden, params);
+    }
+    let mut clauses = Vec::new();
+    let mut allowed = Vec::new();
+    for folder in &user.folders {
+        let (cond, folder_params) = subtree(column, folder);
+        clauses.push(cond);
+        allowed.extend(folder_params);
+    }
+    allowed.append(&mut params);
+    (format!("({}) AND {hidden}", clauses.join(" OR ")), allowed)
+}
+
+/// A condition on `column` (a folder path) leaving out hidden folders and everything
+/// below them.
+pub fn not_in_hidden_folders(hidden: &Hidden, column: &str) -> (String, Vec<String>) {
+    if hidden.folders.is_empty() {
         return ("1".into(), Vec::new());
     }
     let mut clauses = Vec::new();
     let mut params = Vec::new();
-    for folder in &user.folders {
-        clauses.push(format!(
-            "({column} = ? OR ({column} >= ? AND {column} < ?))"
-        ));
-        params.push(folder.clone());
-        params.push(format!("{folder}/"));
-        params.push(format!("{folder}0")); // '0' sorts right after '/'
+    for folder in &hidden.folders {
+        let (cond, folder_params) = subtree(column, folder);
+        clauses.push(cond);
+        params.extend(folder_params);
     }
-    (format!("({})", clauses.join(" OR ")), params)
+    (format!("NOT ({})", clauses.join(" OR ")), params)
+}
+
+/// A condition on `column` (a media id) leaving out hidden photos and videos. No
+/// parameters, so it can go anywhere in a query.
+pub fn not_hidden(hidden: &Hidden, column: &str) -> String {
+    match &hidden.media_rule {
+        None => "1".into(),
+        Some(rule) => format!(
+            "{column} NOT IN (SELECT media_id FROM hidden WHERE media_id IS NOT NULL AND {rule})"
+        ),
+    }
+}
+
+/// Count, newest capture time and cover of the visible media in the folders matching
+/// `cond` (on `f`, with `params`). Uses the folders' stored totals unless hidden photos
+/// apply, which then have to be left out one by one.
+pub(super) fn summarize(
+    conn: &Connection,
+    cond: &str,
+    params: &[String],
+    hidden: &Hidden,
+) -> rusqlite::Result<(i64, Option<i64>, Option<Cover>)> {
+    if hidden.media_rule.is_none() {
+        let (count, latest): (i64, Option<i64>) = conn.query_row(
+            &format!(
+                "SELECT coalesce(sum(f.media_count), 0), max(f.latest_taken_at) FROM folders f WHERE {cond}"
+            ),
+            params_from_iter(params),
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let cover = if count == 0 {
+            None
+        } else {
+            conn.query_row(
+                &format!(
+                    "SELECT m.id, m.kind, m.mtime FROM folders f
+                     JOIN media m ON m.id = f.cover_media_id
+                     WHERE f.media_count > 0 AND {cond}
+                     ORDER BY f.latest_taken_at DESC LIMIT 1"
+                ),
+                params_from_iter(params),
+                |r| cover(r, 0),
+            )
+            .optional()?
+            .flatten()
+        };
+        return Ok((count, latest, cover));
+    }
+    let visible = not_hidden(hidden, "m.id");
+    let from =
+        format!("FROM media m JOIN folders f ON f.id = m.folder_id WHERE {cond} AND {visible}");
+    let count: i64 = conn.query_row(
+        &format!("SELECT count(*) {from}"),
+        params_from_iter(params),
+        |r| r.get(0),
+    )?;
+    let newest = conn
+        .query_row(
+            &format!("SELECT m.taken_at, m.id, m.kind, m.mtime {from} ORDER BY m.taken_at DESC, m.id DESC LIMIT 1"),
+            params_from_iter(params),
+            |r| Ok((r.get::<_, i64>(0)?, cover(r, 1)?)),
+        )
+        .optional()?;
+    Ok(match newest {
+        Some((latest, cover)) => (count, Some(latest), cover),
+        None => (0, None, None),
+    })
 }
 
 /// The same subtree condition, for one folder.
@@ -56,6 +139,9 @@ pub struct Album {
     count: i64,
     latest_taken_at: Option<i64>,
     cover: Option<Cover>,
+    /// Shown only because "show hidden" is on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    hidden: bool,
 }
 
 #[derive(Deserialize)]
@@ -94,31 +180,52 @@ pub async fn albums(
         .db
         .run(move |conn| {
             let (where_scope, mut params) = scope(&user, "f.path");
+            // Each folder's count, newest time and cover: the stored totals, or worked
+            // out without the hidden photos when some apply.
+            let folders = if user.hidden.media_rule.is_none() {
+                "SELECT f.id, f.name, f.path, f.root_id, f.media_count AS n,
+                        f.latest_taken_at AS latest, f.cover_media_id AS cover_id
+                 FROM folders f"
+                    .to_string()
+            } else {
+                let visible = not_hidden(&user.hidden, "x.id");
+                format!(
+                    "SELECT f.id, f.name, f.path, f.root_id,
+                            (SELECT count(*) FROM media x WHERE x.folder_id = f.id AND {visible}) AS n,
+                            (SELECT max(x.taken_at) FROM media x WHERE x.folder_id = f.id AND {visible}) AS latest,
+                            (SELECT x.id FROM media x WHERE x.folder_id = f.id AND {visible}
+                             ORDER BY x.taken_at DESC, x.id DESC LIMIT 1) AS cover_id
+                     FROM folders f"
+                )
+            };
+            let with = format!(
+                "WITH v AS ({folders} WHERE f.media_count > 0 AND {where_scope})"
+            );
             let total: i64 = conn.query_row(
-                &format!(
-                    "SELECT count(*) FROM folders f WHERE f.media_count > 0 AND {where_scope}"
-                ),
+                &format!("{with} SELECT count(*) FROM v WHERE v.n > 0"),
                 params_from_iter(&params),
                 |r| r.get(0),
             )?;
             params.push(limit.to_string());
             params.push(offset.to_string());
             let mut stmt = conn.prepare(&format!(
-                "SELECT f.id, f.name, f.path, r.path, f.media_count, f.latest_taken_at,
-                        m.id, m.kind, m.mtime
-                 FROM folders f
-                 JOIN roots r ON r.id = f.root_id
-                 LEFT JOIN media m ON m.id = f.cover_media_id
-                 WHERE f.media_count > 0 AND {where_scope}
-                 ORDER BY f.latest_taken_at DESC, f.id DESC
+                "{with}
+                 SELECT v.id, v.name, v.path, r.path, v.n, v.latest, m.id, m.kind, m.mtime
+                 FROM v
+                 JOIN roots r ON r.id = v.root_id
+                 LEFT JOIN media m ON m.id = v.cover_id
+                 WHERE v.n > 0
+                 ORDER BY v.latest DESC, v.id DESC
                  LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)"
             ))?;
             let items = stmt
                 .query_map(params_from_iter(&params), |r| {
+                    let path: String = r.get(2)?;
                     Ok(Album {
                         id: r.get(0)?,
                         name: r.get(1)?,
-                        path: relative(&r.get::<_, String>(2)?, &r.get::<_, String>(3)?),
+                        hidden: user.hidden.marks_folder(&path),
+                        path: relative(&path, &r.get::<_, String>(3)?),
                         count: r.get(4)?,
                         latest_taken_at: r.get(5)?,
                         cover: cover(r, 6)?,
@@ -171,6 +278,8 @@ pub struct Subfolder {
     count: i64,
     latest_taken_at: Option<i64>,
     cover: Option<Cover>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    hidden: bool,
 }
 
 #[derive(Serialize)]
@@ -181,6 +290,9 @@ pub struct FolderDetail {
     media_count: i64,
     /// Ancestors the user may see, outermost first.
     breadcrumbs: Vec<Crumb>,
+    /// Shown only because "show hidden" is on: "this" folder is hidden, or a "parent".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hidden: Option<&'static str>,
     /// Child folders with media somewhere below them, newest first.
     subfolders: Vec<Subfolder>,
 }
@@ -217,7 +329,12 @@ pub(super) fn load_folder(conn: &Connection, id: i64) -> rusqlite::Result<Option
 /// their existence isn't revealed).
 pub(super) fn visible_folder(conn: &Connection, user: &User, id: i64) -> ApiResult<FolderRow> {
     match load_folder(conn, id)? {
-        Some(folder) if user.can_access(Path::new(&folder.path)) => Ok(folder),
+        Some(folder)
+            if user.can_access(Path::new(&folder.path))
+                && !user.hidden.hides_folder(&folder.path) =>
+        {
+            Ok(folder)
+        }
         _ => Err(ApiError::status(StatusCode::NOT_FOUND, "Folder not found.")),
     }
 }
@@ -255,54 +372,64 @@ fn folder_detail(conn: &Connection, user: &User, id: i64) -> ApiResult<FolderDet
     }
     breadcrumbs.reverse();
 
-    let subfolders = subfolders_of(conn, folder.id)?;
+    let subfolders = subfolders_of(conn, folder.id, &user.hidden)?;
+    let media_count = if user.hidden.media_rule.is_none() {
+        folder.media_count
+    } else {
+        conn.query_row(
+            &format!(
+                "SELECT count(*) FROM media m WHERE m.folder_id = ?1 AND {}",
+                not_hidden(&user.hidden, "m.id")
+            ),
+            [folder.id],
+            |r| r.get(0),
+        )?
+    };
 
     Ok(FolderDetail {
         id: folder.id,
         name: display_name(&folder),
         path: relative(&folder.path, &folder.root),
-        media_count: folder.media_count,
+        media_count,
         breadcrumbs,
         subfolders,
+        hidden: if user.hidden.marked_folders.contains(&folder.path) {
+            Some("this")
+        } else if user.hidden.marks_folder(&folder.path) {
+            Some("parent")
+        } else {
+            None
+        },
     })
 }
 
-/// Child folders that have media somewhere below them, with nested counts and the
-/// newest cover, newest first.
-pub(super) fn subfolders_of(conn: &Connection, folder_id: i64) -> anyhow::Result<Vec<Subfolder>> {
+/// Child folders that have visible media somewhere below them, with nested counts and
+/// the newest cover, newest first. Hidden folders and photos are left out.
+pub(super) fn subfolders_of(
+    conn: &Connection,
+    folder_id: i64,
+    hidden: &Hidden,
+) -> anyhow::Result<Vec<Subfolder>> {
     let children: Vec<(i64, String, String)> = conn
         .prepare("SELECT id, name, path FROM folders WHERE parent_id = ?1")?
         .query_map([folder_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let mut subfolders = Vec::new();
     for (child_id, name, path) in children {
-        let (cond, params) = subtree("f.path", &path);
-        let (count, latest): (i64, Option<i64>) = conn.query_row(
-            &format!(
-                "SELECT coalesce(sum(f.media_count), 0), max(f.latest_taken_at)
-                 FROM folders f WHERE {cond}"
-            ),
-            params_from_iter(&params),
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
+        if hidden.hides_folder(&path) {
+            continue;
+        }
+        let (below, mut params) = subtree("f.path", &path);
+        let (visible, visible_params) = not_in_hidden_folders(hidden, "f.path");
+        params.extend(visible_params);
+        let (count, latest, cover) =
+            summarize(conn, &format!("{below} AND {visible}"), &params, hidden)?;
         if count == 0 {
             continue;
         }
-        let cover = conn
-            .query_row(
-                &format!(
-                    "SELECT m.id, m.kind, m.mtime FROM folders f
-                     JOIN media m ON m.id = f.cover_media_id
-                     WHERE f.media_count > 0 AND {cond}
-                     ORDER BY f.latest_taken_at DESC LIMIT 1"
-                ),
-                params_from_iter(&params),
-                |r| cover(r, 0),
-            )
-            .optional()?
-            .flatten();
         subfolders.push(Subfolder {
             id: child_id,
+            hidden: hidden.marks_folder(&path),
             name,
             count,
             latest_taken_at: latest,
@@ -334,9 +461,22 @@ pub struct MediaItem {
     size: i64,
     /// Changes whenever the file does; used to version preview URLs.
     v: i64,
+    /// Shown only because "show hidden" is on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    hidden: bool,
 }
 
 impl MediaItem {
+    /// Flags items that are shown only because "show hidden" is on.
+    pub(super) fn mark_hidden(items: &mut [MediaItem], hidden: &Hidden) {
+        if hidden.marked_media.is_empty() {
+            return;
+        }
+        for item in items {
+            item.hidden = hidden.marked_media.contains(&item.id);
+        }
+    }
+
     pub(super) fn from_row(r: &Row) -> rusqlite::Result<Self> {
         let (width, height): (Option<u32>, Option<u32>) = (r.get(3)?, r.get(4)?);
         let orientation: Option<u16> = r.get(5)?;
@@ -355,6 +495,7 @@ impl MediaItem {
             duration_ms: r.get(7)?,
             v: r.get(8)?,
             size: r.get(9)?,
+            hidden: false,
         })
     }
 }
@@ -390,39 +531,50 @@ pub async fn folder_media(
         .run(move |conn| {
             Ok(visible_folder(conn, &user, id).and_then(|folder| {
                 let recursive = query.recursive.then(|| scope(&user, "f.path"));
-                Ok(media_page(conn, &folder, recursive, offset, limit)?)
+                let mut page = media_page(conn, &folder, recursive, &user.hidden, offset, limit)?;
+                MediaItem::mark_hidden(&mut page.items, &user.hidden);
+                Ok(page)
             }))
         })
         .await??;
     Ok(Json(result))
 }
 
-/// A page of a folder's media, newest first. With `recursive` (a scope condition on
-/// `f.path` for the subfolders that may be included), media below it is included too.
+/// A page of a folder's media, newest first, without hidden photos. With `recursive`
+/// (a condition on `f.path` for the subfolders that may be included, which should
+/// leave out hidden folders), media below it is included too.
 pub(super) fn media_page(
     conn: &Connection,
     folder: &FolderRow,
     recursive: Option<(String, Vec<String>)>,
+    hidden: &Hidden,
     offset: i64,
     limit: i64,
 ) -> rusqlite::Result<Paged<MediaItem>> {
+    let visible = not_hidden(hidden, "m.id");
     let Some((where_scope, scope_params)) = recursive else {
         let items = conn
             .prepare(&format!(
-                "SELECT {MEDIA_ITEM_COLUMNS} FROM media m WHERE m.folder_id = ?1
+                "SELECT {MEDIA_ITEM_COLUMNS} FROM media m WHERE m.folder_id = ?1 AND {visible}
                  ORDER BY m.taken_at DESC, m.id DESC LIMIT ?2 OFFSET ?3"
             ))?
             .query_map([folder.id, limit, offset], MediaItem::from_row)?
             .collect::<rusqlite::Result<_>>()?;
-        return Ok(Paged {
-            items,
-            total: folder.media_count,
-        });
+        let total = if hidden.media_rule.is_none() {
+            folder.media_count
+        } else {
+            conn.query_row(
+                &format!("SELECT count(*) FROM media m WHERE m.folder_id = ?1 AND {visible}"),
+                [folder.id],
+                |r| r.get(0),
+            )?
+        };
+        return Ok(Paged { items, total });
     };
     let (below, mut params) = subtree("f.path", &folder.path);
     params.extend(scope_params);
     let from = format!(
-        "FROM media m JOIN folders f ON f.id = m.folder_id WHERE {below} AND {where_scope}"
+        "FROM media m JOIN folders f ON f.id = m.folder_id WHERE {below} AND {where_scope} AND {visible}"
     );
     let total = conn.query_row(
         &format!("SELECT count(*) {from}"),

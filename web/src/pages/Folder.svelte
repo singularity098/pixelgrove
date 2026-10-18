@@ -5,10 +5,10 @@
   import ShareDialog from '../components/ShareDialog.svelte';
   import Slideshow from '../components/Slideshow.svelte';
   import Thumb from '../components/Thumb.svelte';
-  import { get } from '../lib/api';
+  import { del, get, put } from '../lib/api';
   import { PagedList, type FolderDetail, type MediaItem } from '../lib/media.svelte';
   import { openViewer } from '../lib/query';
-  import { link, onVisible } from '../lib/router.svelte';
+  import { link, navigate, onVisible } from '../lib/router.svelte';
   import { session } from '../lib/session.svelte';
   import { slideshowSettings } from '../lib/slideshow.svelte';
 
@@ -30,11 +30,47 @@
       : media,
   );
 
-  $effect(() => {
+  const loadFolder = () =>
     get<FolderDetail>(`/folders/${id}`)
       .then((f) => (folder = f))
       .catch((e) => (error = (e as Error).message));
+  $effect(() => {
+    loadFolder();
   });
+
+  // Hiding: admins hide for everyone, others just for themselves.
+  const me = $derived(session.current.status === 'signed-in' ? session.current.user : null);
+  let hideBusy = $state(false);
+  async function toggleHidden() {
+    if (!folder || !me || hideBusy) return;
+    const f = folder;
+    if (f.hidden !== 'this') {
+      const message =
+        me.role === 'admin'
+          ? `Hide “${f.name}” and everything in it from everyone? Admins can still see it with “Show hidden”.`
+          : `Hide “${f.name}” and everything in it? Only for you: turn on “Show hidden” to see it again.`;
+      if (!confirm(message)) return;
+    }
+    hideBusy = true;
+    try {
+      if (f.hidden === 'this') {
+        await del(`/folders/${f.id}/hidden`);
+      } else {
+        await put(`/folders/${f.id}/hidden`);
+        if (!me.show_hidden) {
+          // It's gone from view: go up a level.
+          const parent = f.breadcrumbs.at(-1);
+          navigate(parent ? `/folder/${parent.id}` : '/', true);
+          return;
+        }
+      }
+      await loadFolder();
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      hideBusy = false;
+    }
+  }
 </script>
 
 <section class="page wide">
@@ -55,15 +91,28 @@
         {/if}
         {#if canShare}
           <button class="ghost action" onclick={() => (sharing = true)}><Icon name="sharing" size={16} /> Share</button>
+          {#if folder.hidden !== 'parent'}
+            <button class="ghost action" onclick={toggleHidden} disabled={hideBusy}>
+              <Icon name={folder.hidden ? 'eye' : 'eyeOff'} size={16} />
+              {folder.hidden ? 'Unhide' : 'Hide'}
+            </button>
+          {/if}
         {/if}
       </div>
     </div>
+    {#if folder.hidden}
+      <p class="hidden-note small">
+        <Icon name="eyeOff" size={16} />
+        {folder.hidden === 'this' ? 'This folder is hidden.' : 'A folder above this one is hidden.'}
+        You see it because “Show hidden” is on.
+      </p>
+    {/if}
     <p class="muted small">{folder.media_count.toLocaleString()} item{folder.media_count === 1 ? '' : 's'}</p>
 
     {#if folder.subfolders.length}
       <div class="subfolders">
         {#each folder.subfolders as sub (sub.id)}
-          <a class="subfolder" href="/folder/{sub.id}" onclick={link}>
+          <a class="subfolder" class:hidden-item={sub.hidden} href="/folder/{sub.id}" onclick={link}>
             <div class="cover"><Thumb media={sub.cover} /></div>
             <div>
               <div class="name">{sub.name}</div>
@@ -156,6 +205,21 @@
     color: var(--text);
     text-decoration: none;
     max-width: 260px;
+  }
+
+  .hidden-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 8px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+  }
+
+  .subfolder.hidden-item .cover {
+    opacity: 0.4;
   }
 
   .subfolder:hover {

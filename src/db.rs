@@ -166,6 +166,22 @@ ALTER TABLE media ADD COLUMN place TEXT;
 ALTER TABLE media ADD COLUMN country TEXT;
 CREATE INDEX media_country ON media(country, place) WHERE country IS NOT NULL;
 "#,
+    r#"
+-- Hidden photos and folders (a folder with everything below it). Without a user_id
+-- the item was hidden by an admin, for everyone; otherwise only for that user.
+CREATE TABLE hidden (
+    id          INTEGER PRIMARY KEY,
+    user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    media_id    INTEGER REFERENCES media(id) ON DELETE CASCADE,
+    folder_path TEXT,
+    created_at  INTEGER NOT NULL,
+    CHECK ((media_id IS NULL) != (folder_path IS NULL))
+);
+CREATE UNIQUE INDEX hidden_media ON hidden(media_id, coalesce(user_id, 0)) WHERE media_id IS NOT NULL;
+CREATE UNIQUE INDEX hidden_folder ON hidden(folder_path, coalesce(user_id, 0)) WHERE folder_path IS NOT NULL;
+CREATE INDEX hidden_user ON hidden(user_id);
+ALTER TABLE users ADD COLUMN show_hidden INTEGER NOT NULL DEFAULT 0;
+"#,
 ];
 
 #[derive(Clone)]

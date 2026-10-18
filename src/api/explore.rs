@@ -6,7 +6,7 @@ use axum::extract::{Query, State};
 use rusqlite::{Connection, params_from_iter};
 use serde::{Deserialize, Serialize};
 
-use super::browse::{Cover, MEDIA_ITEM_COLUMNS, MediaItem, Paged, cover, scope};
+use super::browse::{Cover, MEDIA_ITEM_COLUMNS, MediaItem, Paged, cover, not_hidden, scope};
 use super::{ApiResult, CurrentUser};
 use crate::auth::User;
 use crate::server::AppState;
@@ -62,10 +62,11 @@ fn groups(
 ) -> anyhow::Result<Vec<Group>> {
     let (where_scope, mut params) = scope(user, "f.path");
     params.push(SECTION_SIZE.to_string());
+    let visible = not_hidden(&user.hidden, "m.id");
     let sql = format!(
         "SELECT {select}, count(*) AS n, max(m.taken_at), m.id, m.kind, m.mtime
          FROM media m JOIN folders f ON f.id = m.folder_id
-         WHERE {where_scope} AND {condition}
+         WHERE {where_scope} AND {visible} AND {condition}
          GROUP BY {group_by} ORDER BY {order} LIMIT CAST(? AS INTEGER)"
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -240,7 +241,7 @@ pub async fn items(
         .db
         .run(move |conn| {
             let (where_scope, mut params) = scope(&user, "f.path");
-            let mut conditions = vec![where_scope];
+            let mut conditions = vec![where_scope, not_hidden(&user.hidden, "m.id")];
             let f = &query;
             let mut add = |sql: &str, value: Option<String>| {
                 if let Some(value) = value {
@@ -268,13 +269,14 @@ pub async fn items(
             )?;
             params.push(limit.to_string());
             params.push(offset.to_string());
-            let items = conn
+            let mut items: Vec<MediaItem> = conn
                 .prepare(&format!(
                     "SELECT {MEDIA_ITEM_COLUMNS} {from} ORDER BY m.taken_at DESC, m.id DESC
                      LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)"
                 ))?
                 .query_map(params_from_iter(&params), MediaItem::from_row)?
                 .collect::<rusqlite::Result<_>>()?;
+            MediaItem::mark_hidden(&mut items, &user.hidden);
             Ok(Paged { items, total })
         })
         .await?;
@@ -297,7 +299,9 @@ pub async fn map_points(
                     "SELECT m.id, round(m.latitude, 5), round(m.longitude, 5), m.taken_at, m.mtime,
                             m.kind = 'video'
                      FROM media m JOIN folders f ON f.id = m.folder_id
-                     WHERE m.latitude IS NOT NULL AND m.longitude IS NOT NULL AND {where_scope}"
+                     WHERE m.latitude IS NOT NULL AND m.longitude IS NOT NULL AND {where_scope}
+                       AND {}",
+                    not_hidden(&user.hidden, "m.id")
                 ))?
                 .query_map(params_from_iter(&params), |r| {
                     Ok((
@@ -345,14 +349,17 @@ pub async fn batch(
             let placeholders = vec!["CAST(? AS INTEGER)"; ids.len()].join(", ");
             let mut params: Vec<String> = ids.iter().map(i64::to_string).collect();
             params.extend(scope_params);
-            Ok(conn
+            let mut items: Vec<MediaItem> = conn
                 .prepare(&format!(
                     "SELECT {MEDIA_ITEM_COLUMNS} FROM media m JOIN folders f ON f.id = m.folder_id
-                     WHERE m.id IN ({placeholders}) AND {where_scope}
-                     ORDER BY m.taken_at DESC, m.id DESC"
+                     WHERE m.id IN ({placeholders}) AND {where_scope} AND {}
+                     ORDER BY m.taken_at DESC, m.id DESC",
+                    not_hidden(&user.hidden, "m.id")
                 ))?
                 .query_map(params_from_iter(&params), MediaItem::from_row)?
-                .collect::<rusqlite::Result<_>>()?)
+                .collect::<rusqlite::Result<_>>()?;
+            MediaItem::mark_hidden(&mut items, &user.hidden);
+            Ok(items)
         })
         .await?;
     Ok(Json(items))

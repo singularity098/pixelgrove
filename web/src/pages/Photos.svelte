@@ -13,9 +13,9 @@
   {/if}
   <div class="albums">
     {#each albums.items as album (album.id)}
-      <a class="album" href="/folder/{album.id}" onclick={link} title={album.path}>
+      <a class="album" class:hidden-item={album.hidden} href="/folder/{album.id}" onclick={link} title={album.path}>
         <div class="cover"><Thumb media={album.cover} /></div>
-        <div class="name">{album.name}</div>
+        <div class="name">{#if album.hidden}<span class="tag">Hidden</span>{/if}{album.name}</div>
         <div class="meta muted small">
           {album.count.toLocaleString()} · {formatDate(album.latest_taken_at)}
         </div>
@@ -45,6 +45,21 @@
     border-radius: 14px;
     overflow: hidden;
     background: var(--surface-2);
+  }
+
+  .hidden-item .cover {
+    opacity: 0.4;
+  }
+
+  .tag {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    margin-right: 6px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    vertical-align: 1px;
   }
 
   .album:hover .cover,
