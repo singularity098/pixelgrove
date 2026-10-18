@@ -23,6 +23,10 @@ pub struct Config {
     pub public_url: Option<String>,
     /// Upper bound for the in-memory preview cache, in megabytes.
     pub preview_cache_mb: u64,
+    /// The ffmpeg used for video thumbnails (a path, or a name on PATH; "off" disables).
+    pub ffmpeg: String,
+    /// How many of the newest videos get thumbnails made ahead of time, after each scan.
+    pub video_preload: usize,
     /// Hours between full rescans of the media roots.
     pub rescan_interval_hours: u64,
     /// File/directory name globs that are never indexed (hidden entries are always skipped).
@@ -55,6 +59,8 @@ impl Config {
             media_roots: vec![PathBuf::from("/media")],
             public_url: None,
             preview_cache_mb: 256,
+            ffmpeg: "ffmpeg".into(),
+            video_preload: 1000,
             rescan_interval_hours: 6,
             exclude: crate::scanner::DEFAULT_EXCLUDES
                 .iter()
@@ -123,6 +129,14 @@ impl Config {
             self.preview_cache_mb = mb
                 .parse()
                 .with_context(|| format!("invalid PIXELGROVE_PREVIEW_CACHE_MB: {mb}"))?;
+        }
+        if let Some(ffmpeg) = env("PIXELGROVE_FFMPEG") {
+            self.ffmpeg = ffmpeg;
+        }
+        if let Some(count) = env("PIXELGROVE_VIDEO_PRELOAD") {
+            self.video_preload = count
+                .parse()
+                .with_context(|| format!("invalid PIXELGROVE_VIDEO_PRELOAD: {count}"))?;
         }
         if let Some(hours) = env("PIXELGROVE_RESCAN_INTERVAL_HOURS") {
             self.rescan_interval_hours = hours

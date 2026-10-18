@@ -5,6 +5,12 @@
  * tile instead grabs one frame, at most a couple at a time, and lets the video go.
  */
 
+/**
+ * The server makes video thumbnails when it has ffmpeg; frames are only grabbed in
+ * the browser when it doesn't (learned from the first video thumbnail that fails).
+ */
+export const serverFrames = { available: true };
+
 const MAX_FRAMES = 3000;
 const CONCURRENT = 2;
 const TIMEOUT_MS = 20000;

@@ -184,6 +184,7 @@ fn file_ref(item: &TrashItem) -> FileRef<'_> {
         mtime: item.mtime,
         size: item.size,
         orientation: item.orientation,
+        duration_ms: item.duration_ms,
         strip_location: false,
     }
 }

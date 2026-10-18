@@ -348,6 +348,7 @@
         <video
           class="slide"
           src={urls.file(current) ?? ''}
+          poster={urls.large(current)}
           playsinline
           {muted}
           onloadeddata={(e) => videoReady(e.currentTarget)}

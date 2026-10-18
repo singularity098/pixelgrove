@@ -70,6 +70,8 @@ pub enum Preview {
 pub struct Previews {
     cache: Mutex<SizedLru>,
     permits: Semaphore,
+    /// Makes video thumbnails, when ffmpeg is installed.
+    ffmpeg: Option<crate::video::Ffmpeg>,
 }
 
 /// Identifies a preview; the mtime and size make edits invalidate old entries.
@@ -87,7 +89,44 @@ impl Previews {
         Self {
             cache: Mutex::new(SizedLru::new(cache_bytes)),
             permits: Semaphore::new(workers),
+            ffmpeg: None,
         }
+    }
+
+    pub fn with_ffmpeg(mut self, ffmpeg: Option<crate::video::Ffmpeg>) -> Self {
+        self.ffmpeg = ffmpeg;
+        self
+    }
+
+    pub fn has_ffmpeg(&self) -> bool {
+        self.ffmpeg.is_some()
+    }
+
+    /// A video's thumbnail (one frame, as JPEG), or `None` without ffmpeg.
+    pub async fn video(
+        self: &Arc<Self>,
+        key: Key,
+        path: &Path,
+        duration_ms: Option<i64>,
+    ) -> Result<Option<Bytes>> {
+        let Some(ffmpeg) = &self.ffmpeg else {
+            return Ok(None);
+        };
+        if let Some(bytes) = self.cache.lock().unwrap().get(&key) {
+            return Ok(Some(bytes));
+        }
+        let _permit = self.permits.acquire().await?;
+        if let Some(bytes) = self.cache.lock().unwrap().get(&key) {
+            return Ok(Some(bytes));
+        }
+        let bytes = Bytes::from(ffmpeg.frame(path, key.variant, duration_ms).await?);
+        self.cache.lock().unwrap().put(key, bytes.clone());
+        Ok(Some(bytes))
+    }
+
+    /// Whether a preview is already in memory.
+    pub fn is_cached(&self, key: &Key) -> bool {
+        self.cache.lock().unwrap().contains(key)
     }
 
     pub async fn get(
@@ -317,6 +356,10 @@ impl SizedLru {
 
     fn get(&mut self, key: &Key) -> Option<Bytes> {
         self.entries.get(key).cloned()
+    }
+
+    fn contains(&self, key: &Key) -> bool {
+        self.entries.contains(key)
     }
 
     fn put(&mut self, key: Key, value: Bytes) {

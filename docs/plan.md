@@ -34,7 +34,12 @@ the original. Browse API calls take 1–4 ms at 100k files.
 ### Media
 - **v1 formats:** JPEG, PNG, WebP, GIF, AVIF; video MP4, WebM, MOV.
 - **Later:** HEIC, RAW (CR2/NEF/ARW/DNG), MKV/AVI.
-- **Video tiles:** the browser renders the first frame (`preload="metadata"`); no ffmpeg in v1.
+- **Video tiles:** one frame about a second in, extracted by a bundled minimal FFmpeg
+  (static, ~11 MB: MP4/MOV/MKV/WebM in; H.264, HEVC, VP8/9, MPEG-4, MJPEG, ProRes; JPEG
+  out), kept in the in-memory preview cache like photo previews; the newest 1,000 are made
+  after each scan. Without FFmpeg, browsers grab a frame themselves. Measured: 24 tiles of
+  4K HEVC and 1080p H.264 phone videos in under 1 s (0.4 MB), against 10 of 24 after 30 s
+  (10.5 MB) when the browser had to do it.
 - Video is streamed directly with HTTP range requests (seeking works).
 - **Timestamp:** EXIF `DateTimeOriginal` (or video creation time), falling back to file mtime.
 
@@ -190,7 +195,7 @@ A synthetic library can be generated with `scripts/gen-bench-library.py`.
 | Memory, after exercising every API (warm SQLite caches) | ~50 MB | — |
 | Memory, peak during first scan | 110 MB | — |
 | `/config` (database) | 25 MB | tens of MB |
-| Docker image | ~14 MB (the static binary alone, on `scratch`) | < 30 MB |
+| Docker image | ~25 MB (the static binary and a minimal FFmpeg, on `scratch`) | < 30 MB |
 
 ---
 

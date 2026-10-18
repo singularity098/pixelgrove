@@ -11,7 +11,10 @@ An ultra-light, fast, self-hosted photo and video library written in Rust.
 - Share a photo or folder with a link that needs no account.
 - Slideshows, nine colour themes (dark, light, AMOLED black, Dracula, Tokyo Night and the
   four Catppuccin flavours), works on phones and installs as an app.
-- One small static binary in a `scratch` Docker image, for `linux/amd64` and `linux/arm64`.
+- Video thumbnails made on the server by a small bundled FFmpeg, so they appear quickly
+  for any video (including iPhone HEVC), and are kept in memory only.
+- One small static binary (plus FFmpeg) in a `scratch` Docker image, for `linux/amd64`
+  and `linux/arm64`.
 
 > **Status:** all v1 milestones (M0–M8) are complete. See
 > [docs/requirements.md](docs/requirements.md) and [docs/plan.md](docs/plan.md).
@@ -210,7 +213,9 @@ Settings come from `/config/pixelgrove.toml` (optional), overridden by environme
 | `PIXELGROVE_BIND` | `0.0.0.0:8080` | Listen address |
 | `PIXELGROVE_MEDIA_ROOTS` | `/media` | `:`-separated directories to scan |
 | `PIXELGROVE_PUBLIC_URL` | — | External URL used in share links |
-| `PIXELGROVE_PREVIEW_CACHE_MB` | `256` | In-memory preview cache size |
+| `PIXELGROVE_PREVIEW_CACHE_MB` | `256` | In-memory preview cache size (photo previews and video thumbnails) |
+| `PIXELGROVE_FFMPEG` | `ffmpeg` (in the image: the bundled one) | ffmpeg used for video thumbnails; `off` to have browsers grab frames instead |
+| `PIXELGROVE_VIDEO_PRELOAD` | `1000` | Newest videos whose thumbnails are made in the background after each scan (`0`: only when viewed) |
 | `PIXELGROVE_RESCAN_INTERVAL_HOURS` | `6` | Hours between full rescans |
 | `PIXELGROVE_EXCLUDE` | `@eaDir,#recycle,#snapshot,lost+found` | Comma-separated name globs to skip (hidden entries are always skipped) |
 | `PIXELGROVE_LOG` | `info` | Log filter (e.g. `debug`) |
@@ -246,4 +251,5 @@ UI in the single `pixelgrove` binary.
 
 ## License
 
-[MIT](LICENSE). Place data © GeoNames (CC BY 4.0); map data © OpenStreetMap contributors.
+[MIT](LICENSE). The Docker image also contains FFmpeg (LGPL 2.1 or later), built from its
+official source with only the decoders needed for video thumbnails (see the Dockerfile). Place data © GeoNames (CC BY 4.0); map data © OpenStreetMap contributors.

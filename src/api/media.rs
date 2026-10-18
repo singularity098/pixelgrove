@@ -202,6 +202,8 @@ pub(super) struct FileRef<'a> {
     pub mtime: i64,
     pub size: i64,
     pub orientation: Option<u16>,
+    /// Videos: where to take the thumbnail frame from.
+    pub duration_ms: Option<i64>,
     /// Served through a share link: remove location data from originals.
     pub strip_location: bool,
 }
@@ -215,18 +217,33 @@ pub(super) async fn preview_response(
 ) -> ApiResult<Response> {
     let variant = Variant::parse(variant)
         .ok_or_else(|| ApiError::status(StatusCode::NOT_FOUND, "Unknown preview size."))?;
-    if file.kind != "image" {
-        return Err(ApiError::status(
-            StatusCode::NOT_FOUND,
-            "Videos have no preview image.",
-        ));
-    }
     let key = Key {
         media_id: file.cache_id,
         variant,
         mtime: file.mtime,
         size: file.size,
     };
+    if file.kind == "video" {
+        // One frame, by ffmpeg; without it (or if it fails) browsers grab one themselves.
+        let frame = state
+            .previews
+            .video(key, file.path, file.duration_ms)
+            .await
+            .unwrap_or_else(|err| {
+                tracing::debug!(path = %file.path.display(), "video thumbnail failed: {err:#}");
+                None
+            })
+            .ok_or_else(|| ApiError::status(StatusCode::NOT_FOUND, "No preview for this video."))?;
+        let mut response = (
+            [(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"))],
+            Body::from(frame),
+        )
+            .into_response();
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, cache_control(versioned, file.mtime));
+        return Ok(response);
+    }
     let preview = match state.previews.get(key, file.path, file.orientation).await {
         Ok(preview) => preview,
         Err(err) => {
@@ -280,6 +297,7 @@ impl MediaRow {
             mtime: self.mtime,
             size: self.size,
             orientation: self.orientation,
+            duration_ms: self.duration_ms,
             strip_location: false,
         }
     }

@@ -393,6 +393,7 @@ fn file_ref<'a>(m: &'a MediaRow, path: &'a Path) -> FileRef<'a> {
         mtime: m.mtime,
         size: m.size,
         orientation: m.orientation,
+        duration_ms: m.duration_ms,
         strip_location: true,
     }
 }

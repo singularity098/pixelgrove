@@ -1,8 +1,8 @@
 <script lang="ts">
   import { libraryUrls, type Cover, type MediaUrls } from '../lib/media.svelte';
-  import { cachedFrame, frameOf } from '../lib/video';
+  import { cachedFrame, frameOf, serverFrames } from '../lib/video';
 
-  /** A cover or tile image; videos show their first frame. */
+  /** A cover or tile image; videos show a frame (made by the server, or grabbed here). */
   let {
     media,
     alt = '',
@@ -13,9 +13,16 @@
   // Videos: a frame grabbed once the tile is near the screen (see lib/video.ts).
   const videoUrl = $derived(media?.kind === 'video' ? urls.file({ ...media, kind: 'video' }) : null);
   let frame = $state<string | null>(null);
+  // Try the server's thumbnail first; grab a frame here only if it has none.
+  let grab = $state(!serverFrames.available);
   $effect(() => {
     frame = videoUrl ? (cachedFrame(videoUrl) ?? null) : null;
   });
+
+  function noServerFrame() {
+    serverFrames.available = false;
+    grab = true;
+  }
 
   function grabWhenVisible(node: HTMLElement, url: string) {
     let job: ReturnType<typeof frameOf> | null = null;
@@ -43,6 +50,8 @@
 
 {#if !media || failed}
   <div class="placeholder"></div>
+{:else if videoUrl && !grab}
+  <img src={urls.thumb(media)} {alt} loading="lazy" decoding="async" onerror={noServerFrame} />
 {:else if videoUrl}
   {#if frame}
     <img src={frame} {alt} />

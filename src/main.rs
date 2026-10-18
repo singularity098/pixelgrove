@@ -15,6 +15,7 @@ mod shares;
 #[cfg(test)]
 mod testdata;
 mod trash;
+mod video;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,9 +82,18 @@ async fn serve() -> Result<()> {
     indexer.start();
     spawn_session_cleanup(db.clone());
 
-    let previews = Arc::new(preview::Previews::new(
-        config.preview_cache_mb as usize * 1024 * 1024,
-    ));
+    let ffmpeg = video::Ffmpeg::detect(&config.ffmpeg).await;
+    let previews = Arc::new(
+        preview::Previews::new(config.preview_cache_mb as usize * 1024 * 1024).with_ffmpeg(ffmpeg),
+    );
+    if previews.has_ffmpeg() && config.video_preload > 0 {
+        video::spawn_preload(
+            db.clone(),
+            indexer.clone(),
+            previews.clone(),
+            config.video_preload,
+        );
+    }
     let app = server::router(AppState {
         previews,
         config: Arc::new(config),

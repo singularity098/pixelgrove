@@ -439,7 +439,7 @@
       {#key item.id}
         {#if item.kind === 'video'}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={src} controls autoplay playsinline use:releaseOnDestroy></video>
+          <video src={src} poster={urls.large(item)} controls autoplay playsinline use:releaseOnDestroy></video>
         {:else}
           <img
             {src}
