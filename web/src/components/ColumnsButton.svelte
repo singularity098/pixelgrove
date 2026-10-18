@@ -2,7 +2,7 @@
   import { COLUMN_CHOICES, currentColumns, setColumns } from '../lib/columns';
   import Icon from './Icon.svelte';
 
-  /** The header's button for how many columns photo grids have on phones: each tap
+  /** The header's button for how many columns photo and folder grids have on phones: each tap
    *  steps 2 → 3 → 4 → 2. Only shown on phone-sized screens, where it applies. */
   let columns = $state(currentColumns());
 

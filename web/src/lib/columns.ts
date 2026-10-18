@@ -1,4 +1,4 @@
-/** How many columns photo grids have on phones (2, 3 or 4), remembered per device. */
+/** How many columns photo and folder grids have on phones (2, 3 or 4), remembered per device. */
 export const COLUMN_CHOICES = [2, 3, 4] as const;
 export type Columns = (typeof COLUMN_CHOICES)[number];
 

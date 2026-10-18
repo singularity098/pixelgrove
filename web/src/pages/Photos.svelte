@@ -82,8 +82,24 @@
 
   @media (max-width: 520px) {
     .albums {
-      grid-template-columns: repeat(2, 1fr);
-      gap: 16px 10px;
+      /* Same column count as photo grids (the header's columns button, lib/columns.ts). */
+      grid-template-columns: repeat(var(--phone-columns, 3), 1fr);
+      gap: 14px 8px;
+    }
+
+    .cover {
+      border-radius: 10px;
+    }
+
+    .name {
+      margin-top: 6px;
+      font-size: 0.9rem;
+    }
+
+    .meta {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   }
 </style>
