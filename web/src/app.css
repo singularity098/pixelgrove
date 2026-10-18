@@ -1,3 +1,4 @@
+/* Themes: see src/theme.ts for the list (names, light/dark mode, swatches). */
 :root,
 :root[data-theme='dark'] {
   color-scheme: dark;
@@ -23,6 +24,97 @@
   --accent: #1f8a55;
   --accent-contrast: #ffffff;
   --danger: #c5221f;
+}
+
+:root[data-theme='amoled'] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #0a0a0a;
+  --surface-2: #161616;
+  --border: #262626;
+  --text: #e8e8e8;
+  --text-muted: #8f8f8f;
+  --accent: #4fc184;
+  --accent-contrast: #000000;
+  --danger: #ff6b6b;
+}
+
+:root[data-theme='dracula'] {
+  color-scheme: dark;
+  --bg: #21222c;
+  --surface: #282a36;
+  --surface-2: #343746;
+  --border: #44475a;
+  --text: #f8f8f2;
+  --text-muted: #a4abcd;
+  --accent: #bd93f9;
+  --accent-contrast: #21222c;
+  --danger: #ff5555;
+}
+
+:root[data-theme='tokyo-night'] {
+  color-scheme: dark;
+  --bg: #1a1b26;
+  --surface: #1f2335;
+  --surface-2: #292e42;
+  --border: #3b4261;
+  --text: #c0caf5;
+  --text-muted: #9aa5ce;
+  --accent: #7aa2f7;
+  --accent-contrast: #1a1b26;
+  --danger: #f7768e;
+}
+
+:root[data-theme='catppuccin-mocha'] {
+  color-scheme: dark;
+  --bg: #181825;
+  --surface: #1e1e2e;
+  --surface-2: #313244;
+  --border: #45475a;
+  --text: #cdd6f4;
+  --text-muted: #a6adc8;
+  --accent: #cba6f7;
+  --accent-contrast: #11111b;
+  --danger: #f38ba8;
+}
+
+:root[data-theme='catppuccin-macchiato'] {
+  color-scheme: dark;
+  --bg: #1e2030;
+  --surface: #24273a;
+  --surface-2: #363a4f;
+  --border: #494d64;
+  --text: #cad3f5;
+  --text-muted: #a5adcb;
+  --accent: #c6a0f6;
+  --accent-contrast: #181926;
+  --danger: #ed8796;
+}
+
+:root[data-theme='catppuccin-frappe'] {
+  color-scheme: dark;
+  --bg: #292c3c;
+  --surface: #303446;
+  --surface-2: #414559;
+  --border: #51576d;
+  --text: #c6d0f5;
+  --text-muted: #a5adce;
+  --accent: #ca9ee6;
+  --accent-contrast: #232634;
+  --danger: #e78284;
+}
+
+:root[data-theme='catppuccin-latte'] {
+  color-scheme: light;
+  --bg: #e6e9ef;
+  --surface: #eff1f5;
+  --surface-2: #dce0e8;
+  --border: #ccd0da;
+  --text: #4c4f69;
+  --text-muted: #6c6f85;
+  --accent: #8839ef;
+  --accent-contrast: #eff1f5;
+  --danger: #d20f39;
 }
 
 *,

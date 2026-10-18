@@ -3,6 +3,7 @@
   import MediaGrid from '../components/MediaGrid.svelte';
   import MediaViewerHost from '../components/MediaViewerHost.svelte';
   import Slideshow from '../components/Slideshow.svelte';
+  import ThemeMenu from '../components/ThemeMenu.svelte';
   import Thumb from '../components/Thumb.svelte';
   import Viewer from '../components/Viewer.svelte';
   import { get, post } from '../lib/api';
@@ -11,7 +12,6 @@
   import { navigate, onVisible, route } from '../lib/router.svelte';
   import { SharedFolder, type ShareInfo } from '../lib/shared.svelte';
   import { slideshowSettings } from '../lib/slideshow.svelte';
-  import { currentTheme, setTheme, type Theme } from '../theme';
 
   /** A share link, opened by anyone (no account needed). */
   let { token }: { token: string } = $props();
@@ -21,7 +21,6 @@
   let password = $state('');
   let unlockError = $state('');
   let busy = $state(false);
-  let theme: Theme = $state(currentTheme());
 
   $effect(() => {
     get<ShareInfo>(`/s/${token}`).then(
@@ -61,18 +60,12 @@
     navigate(`/s/${token}${path ? `?p=${encodeURIComponent(path)}` : ''}`);
   }
 
-  function toggleTheme() {
-    theme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(theme);
-  }
 </script>
 
 <header>
   <span class="brand"><img src="/favicon.svg" alt="" width="24" height="24" /> PixelGrove</span>
   <div class="spacer"></div>
-  <button class="icon" onclick={toggleTheme} aria-label="Switch to {theme === 'dark' ? 'light' : 'dark'} mode">
-    <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
-  </button>
+  <ThemeMenu />
 </header>
 
 {#if error}

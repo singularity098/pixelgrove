@@ -9,7 +9,8 @@ An ultra-light, fast, self-hosted photo and video library written in Rust.
 - Previews are made on the fly and kept only in memory: nothing is written next to your
   photos, and `/config` holds just a small database (about 20 MB for 100k files).
 - Share a photo or folder with a link that needs no account.
-- Slideshows, dark and light themes, works on phones and installs as an app.
+- Slideshows, nine colour themes (dark, light, AMOLED black, Dracula, Tokyo Night and the
+  four Catppuccin flavours), works on phones and installs as an app.
 - One small static binary in a `scratch` Docker image, for `linux/amd64` and `linux/arm64`.
 
 > **Status:** all v1 milestones (M0–M8) are complete. See

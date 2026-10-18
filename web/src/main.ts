@@ -1,6 +1,10 @@
 import { mount } from 'svelte';
 import './app.css';
 import App from './App.svelte';
+import { applyTheme, currentTheme } from './theme';
+
+// The saved theme is already set (theme-init.js); add its light/dark mode and title bar colour.
+applyTheme(currentTheme());
 
 export default mount(App, { target: document.getElementById('app')! });
 

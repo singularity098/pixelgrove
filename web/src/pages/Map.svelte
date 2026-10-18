@@ -238,11 +238,11 @@
   }
 
   /* Dim the light OpenStreetMap tiles in dark mode. */
-  :global([data-theme='dark'] .leaflet-tile) {
+  :global([data-mode='dark'] .leaflet-tile) {
     filter: brightness(0.65) invert(1) contrast(2.6) hue-rotate(200deg) saturate(0.35) brightness(0.75);
   }
 
-  :global([data-theme='dark'] .leaflet-container) {
+  :global([data-mode='dark'] .leaflet-container) {
     background: #1b1f23;
   }
 </style>

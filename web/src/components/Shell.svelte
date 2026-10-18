@@ -3,9 +3,9 @@
   import type { User } from '../lib/api';
   import { link, navigate, route } from '../lib/router.svelte';
   import { signOut } from '../lib/session.svelte';
-  import { currentTheme, setTheme, type Theme } from '../theme';
   import Icon, { type IconName } from './Icon.svelte';
   import Storage from './Storage.svelte';
+  import ThemeMenu from './ThemeMenu.svelte';
 
   let { user, children }: { user: User; children: Snippet } = $props();
 
@@ -14,7 +14,6 @@
   let isNarrow = $state(narrow.matches);
   let pinned = $state(readPinned());
   let drawerOpen = $state(false);
-  let theme: Theme = $state(currentTheme());
 
   function readPinned(): boolean {
     try {
@@ -77,10 +76,6 @@
     queueMicrotask(() => searchInput?.focus());
   }
 
-  function toggleTheme() {
-    theme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(theme);
-  }
 
   type Item = { href: string; label: string; icon: IconName };
   // View-only accounts have no favorites, sharing or trash.
@@ -132,9 +127,7 @@
     </form>
     <div class="spacer"></div>
     <button class="icon search-toggle" onclick={openSearch} aria-label="Search"><Icon name="search" /></button>
-    <button class="icon" onclick={toggleTheme} aria-label="Switch to {theme === 'dark' ? 'light' : 'dark'} mode" title="Switch to {theme === 'dark' ? 'light' : 'dark'} mode">
-      <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
-    </button>
+    <ThemeMenu />
     <button class="icon" onclick={signOut} aria-label="Sign out" title="Sign out ({user.username})">
       <Icon name="signOut" />
     </button>
