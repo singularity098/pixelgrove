@@ -27,15 +27,15 @@ An ultra-light, fast, self-hosted photo and video library written in Rust.
 
 | | |
 |---|---|
-| ![A folder of photos with Slideshow and Share buttons](docs/screenshots/folder.webp) | ![The photo viewer with the info panel showing date, camera, lens and location](docs/screenshots/viewer.webp) |
-| A folder, newest first; videos show their length | The viewer: zoom, copy, favorite, share, download, slideshow and info |
-| ![Explore: places, countries and cameras with cover photos](docs/screenshots/explore.webp) | ![A folder in the light theme](docs/screenshots/folder-light.webp) |
-| Explore by place, country, camera and year, worked out offline | Light theme (dark is the default) |
-| ![A shared folder as a visitor sees it, with no sign-in](docs/screenshots/share.webp) | ![PixelGrove on a phone: folders, a folder and the viewer](docs/screenshots/mobile.webp) |
-| A shared folder, as a visitor sees it (no account needed) | On a phone, where it can also be installed as an app |
+| ![The timeline: photos grouped by day, with a list of months to jump to](docs/screenshots/timeline.webp) | ![The photo viewer with the info panel showing date, camera, lens and location](docs/screenshots/viewer.webp) |
+| The timeline, by day, with months to jump to | The viewer: zoom, copy, favorite, share, download, slideshow and info |
+| ![Explore: places, countries and cameras with cover photos](docs/screenshots/explore.webp) | ![The timeline in the light theme](docs/screenshots/light.webp) |
+| Explore by place, country, camera and year, worked out offline | Light theme (dark is the default; there are nine) |
+| ![A shared folder as a visitor sees it, with no sign-in](docs/screenshots/share.webp) | ![PixelGrove on a phone: folders, the timeline and the viewer](docs/screenshots/mobile.webp) |
+| A shared folder, as a visitor sees it (no account needed); videos show their length | On a phone, where it can also be installed as an app |
 
-<sub>The pictures in these screenshots are generated landscapes, not real photos
-([how they're made](scripts/screenshots/README.md)).</sub>
+<sub>The pictures in these screenshots are AI-generated, with made-up dates, cameras and
+places ([how they're made](scripts/screenshots/README.md)).</sub>
 
 ## Running with Docker
 
