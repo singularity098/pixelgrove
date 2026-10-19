@@ -171,6 +171,7 @@
   });
 
   function resetZoom() {
+    stopGlide();
     scale = 1;
     tx = 0;
     ty = 0;
@@ -217,6 +218,7 @@
   function onwheel(event: WheelEvent) {
     if (item.kind !== 'image') return;
     event.preventDefault();
+    stopGlide();
     const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.0025));
     zoomTo(scale * factor, ...stagePoint(event.clientX, event.clientY));
   }
@@ -245,8 +247,54 @@
     };
   }
 
+  // Fling: a zoomed photo let go while moving keeps sliding and slows down, like a
+  // scrolled page. `trail` holds the last moments of the drag to measure its speed.
+  let trail: { t: number; x: number; y: number }[] = [];
+  let glide = 0;
+  let gliding = $state(false);
+  $effect(() => stopGlide);
+
+  function stopGlide() {
+    cancelAnimationFrame(glide);
+    glide = 0;
+    gliding = false;
+  }
+
+  function startGlide() {
+    const now = performance.now();
+    const recent = trail.filter((p) => now - p.t < 100);
+    trail = [];
+    if (recent.length < 2) return;
+    const [first, last] = [recent[0], recent[recent.length - 1]];
+    const dt = last.t - first.t;
+    if (dt <= 0 || now - last.t > 50) return; // Held still before letting go.
+    let vx = (last.x - first.x) / dt;
+    let vy = (last.y - first.y) / dt;
+    if (Math.hypot(vx, vy) < 0.2) return;
+    let previous = now;
+    const step = (time: number) => {
+      const elapsed = Math.min(time - previous, 50);
+      previous = time;
+      const [x, y] = [tx, ty];
+      tx += vx * elapsed;
+      ty += vy * elapsed;
+      clampPan();
+      // Stop along an edge it ran into; slow down smoothly (~325 ms time constant).
+      if (tx === x) vx = 0;
+      if (ty === y) vy = 0;
+      const decay = Math.exp(-elapsed / 325);
+      vx *= decay;
+      vy *= decay;
+      if (Math.hypot(vx, vy) > 0.02) glide = requestAnimationFrame(step);
+      else stopGlide();
+    };
+    gliding = true;
+    glide = requestAnimationFrame(step);
+  }
+
   function onpointerdown(event: PointerEvent) {
     menu = false;
+    stopGlide();
     // Buttons on the photo (previous/next) need their own clicks, so don't capture.
     if (item.kind !== 'image' || event.button !== 0 || (event.target as Element).closest('button')) return;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
@@ -273,6 +321,8 @@
       tx = start.tx + (event.clientX - start.x);
       ty = start.ty + (event.clientY - start.y);
       clampPan();
+      trail.push({ t: performance.now(), x: event.clientX, y: event.clientY });
+      if (trail.length > 20) trail.shift();
     } else {
       // Not zoomed: follow the finger horizontally as swipe feedback.
       tx = event.clientX - start.x;
@@ -284,9 +334,12 @@
     pointers.delete(event.pointerId);
     if (pointers.size > 0) {
       snapshot();
+      trail = [];
       return;
     }
     gestureActive = false;
+    if (scale > 1 && event.type === 'pointerup') startGlide();
+    trail = [];
     if (scale <= 1) {
       const dx = event.clientX - start.x;
       if (dx < -60 && hasNext) next();
@@ -446,7 +499,7 @@
             {src}
             alt={item.name}
             draggable="false"
-            class:animate={!gestureActive}
+            class:animate={!gestureActive && !gliding}
             style="transform: translate({tx}px, {ty}px) scale({scale})" />
         {/if}
       {/key}
