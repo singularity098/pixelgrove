@@ -1,5 +1,6 @@
 <script lang="ts">
   import MediaGrid from '../components/MediaGrid.svelte';
+  import MoreSpace from '../components/MoreSpace.svelte';
   import Icon from '../components/Icon.svelte';
   import MediaViewerHost from '../components/MediaViewerHost.svelte';
   import ShareDialog from '../components/ShareDialog.svelte';
@@ -8,7 +9,7 @@
   import { del, get, put } from '../lib/api';
   import { PagedList, type FolderDetail, type MediaItem } from '../lib/media.svelte';
   import { openViewer } from '../lib/query';
-  import { link, navigate, onVisible } from '../lib/router.svelte';
+  import { link, navigate } from '../lib/router.svelte';
   import { session } from '../lib/session.svelte';
   import { slideshowSettings } from '../lib/slideshow.svelte';
 
@@ -125,8 +126,8 @@
   {/if}
 
   <MediaGrid items={media.items} onopen={(i) => openViewer(media.items[i].id)} />
+  <MoreSpace list={media} />
   {#if media.error}<p class="error">{media.error}</p>{/if}
-  <div use:onVisible={() => media.more()}></div>
 </section>
 
 <MediaViewerHost source={media} />

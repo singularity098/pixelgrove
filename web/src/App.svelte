@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FastScroll from './components/FastScroll.svelte';
   import Shell from './components/Shell.svelte';
   import Account from './pages/Account.svelte';
   import Folder from './pages/Folder.svelte';
@@ -28,6 +29,8 @@
   const filesMatch = $derived(/^\/files(?:\/(\d+))?$/.exec(route.path));
   const searchQuery = $derived(route.path === '/search' ? (route.query.get('q') ?? '').trim() : '');
 </script>
+
+<FastScroll />
 
 {#if shareToken}
   <Shared token={shareToken} />

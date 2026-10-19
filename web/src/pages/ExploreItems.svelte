@@ -1,9 +1,10 @@
 <script lang="ts">
   import MediaGrid from '../components/MediaGrid.svelte';
+  import MoreSpace from '../components/MoreSpace.svelte';
   import MediaViewerHost from '../components/MediaViewerHost.svelte';
   import { PagedList, type MediaItem } from '../lib/media.svelte';
   import { openViewer } from '../lib/query';
-  import { link, onVisible } from '../lib/router.svelte';
+  import { link } from '../lib/router.svelte';
 
   /** Items for one Explore group; the filter comes from the URL query. */
   let { query }: { query: URLSearchParams } = $props();
@@ -23,8 +24,8 @@
     <p class="muted small">{items.total.toLocaleString()} item{items.total === 1 ? '' : 's'}</p>
   {/if}
   <MediaGrid items={items.items} onopen={(i) => openViewer(items.items[i].id)} />
+  <MoreSpace list={items} />
   {#if items.error}<p class="error">{items.error}</p>{/if}
-  <div use:onVisible={() => items.more()}></div>
 </section>
 
 <MediaViewerHost source={items} />

@@ -1,5 +1,6 @@
 <script lang="ts">
   import MediaGrid from '../components/MediaGrid.svelte';
+  import MoreSpace from '../components/MoreSpace.svelte';
   import MediaViewerHost from '../components/MediaViewerHost.svelte';
   import Thumb from '../components/Thumb.svelte';
   import { openViewer } from '../lib/query';
@@ -39,11 +40,12 @@
   {#if results.items.length}
     <h3>Photos and videos</h3>
     <MediaGrid items={results.items} onopen={(i) => openViewer(results.items[i].id)} />
+    <MoreSpace list={results} />
   {:else if results.total === 0 && !results.folders.length}
     <p class="muted">Nothing matched. Search looks in folder and file names, dates (like 2023-07), cameras, lenses and descriptions.</p>
   {/if}
   {#if results.error}<p class="error">{results.error}</p>{/if}
-  <div use:onVisible={() => results.more()}></div>
+  {#if !results.items.length}<div use:onVisible={() => results.more()}></div>{/if}
 </section>
 
 <MediaViewerHost source={results} />

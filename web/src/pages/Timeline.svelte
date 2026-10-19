@@ -62,7 +62,7 @@
       </p>
     {/if}
     {#each days as day (day.key)}
-      <h3 class="day">{day.label}</h3>
+      <h3 class="day" data-scroll-label={monthLabel(day.key.slice(0, 7))}>{day.label}</h3>
       <MediaGrid items={day.items} onopen={(i) => openViewer(timeline.items[day.start + i].id)} />
     {/each}
     {#if !timeline.loading && timeline.items.length === 0 && !timeline.hasMore}

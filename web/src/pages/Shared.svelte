@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import MediaGrid from '../components/MediaGrid.svelte';
+  import MoreSpace from '../components/MoreSpace.svelte';
   import MediaViewerHost from '../components/MediaViewerHost.svelte';
   import Slideshow from '../components/Slideshow.svelte';
   import ThemeMenu from '../components/ThemeMenu.svelte';
@@ -9,7 +10,7 @@
   import { get, post } from '../lib/api';
   import { formatDate, shareUrls } from '../lib/media.svelte';
   import { openViewer, withParam } from '../lib/query';
-  import { navigate, onVisible, route } from '../lib/router.svelte';
+  import { navigate, route } from '../lib/router.svelte';
   import { SharedFolder, type ShareInfo } from '../lib/shared.svelte';
   import { slideshowSettings } from '../lib/slideshow.svelte';
 
@@ -135,8 +136,8 @@
         </div>
       {/if}
       <MediaGrid items={folder.items} {urls} onopen={(i) => openViewer(folder.items[i].id)} />
+      <MoreSpace list={folder} />
       {#if folder.error}<p class="error">{folder.error}</p>{/if}
-      <div use:onVisible={() => folder.more()}></div>
     </section>
     <MediaViewerHost source={folder} {urls} readOnly />
     {#if slideshow && slides}

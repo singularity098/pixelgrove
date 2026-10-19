@@ -646,6 +646,35 @@ mod tests {
     }
 
     #[test]
+    fn moved_files_follow() {
+        let fx = Fixture::new();
+        fx.write("a/x.jpg", &testdata::jpeg_taken_at("2020:01:01 00:00:00"));
+        fx.write("b/y.jpg", &testdata::jpeg_taken_at("2021:01:01 00:00:00"));
+        fx.scan();
+        for (from, to) in [
+            ("a/x.jpg", "b/x.jpg"),
+            ("b/x.jpg", "c/new/x.jpg"),
+            ("c/new/x.jpg", "x.jpg"),
+        ] {
+            let to_path = fx.root().join(to);
+            fs::create_dir_all(to_path.parent().unwrap()).unwrap();
+            fs::rename(fx.root().join(from), &to_path).unwrap();
+            fx.scan();
+            let found: Vec<String> = fx.query(
+                "SELECT f.path || '/' || m.name FROM media m JOIN folders f ON f.id = m.folder_id
+                 WHERE m.name = 'x.jpg'",
+            );
+            assert_eq!(
+                found,
+                [to_path.to_string_lossy()],
+                "after moving {from} to {to}"
+            );
+            let counts: Vec<i64> = fx.query("SELECT sum(media_count) FROM folders");
+            assert_eq!(counts, [2]);
+        }
+    }
+
+    #[test]
     fn indexes_media_and_folders() {
         let fx = Fixture::new();
         fx.write(
