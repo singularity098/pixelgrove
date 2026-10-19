@@ -45,7 +45,7 @@ pub fn find(path: &Path, kind: &str) -> Result<Vec<Patch>> {
         }
         let mut data = Vec::with_capacity(len as usize);
         file.read_to_end(&mut data)?;
-        image_patches(&data)
+        image_patches(&data)?
     };
     patches.sort_by_key(|p| p.offset);
     Ok(patches)
@@ -115,11 +115,43 @@ pub fn apply(patches: &[Patch], offset: u64, chunk: Bytes) -> Bytes {
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
-fn image_patches(data: &[u8]) -> Vec<Patch> {
+fn image_patches(data: &[u8]) -> Result<Vec<Patch>> {
     let mut patches = Vec::new();
     if data.starts_with(PNG_SIGNATURE) {
         png_patches(data, &mut patches);
-        return patches;
+        return Ok(patches);
+    }
+    // JPEG XL keeps EXIF in `Exif` boxes, without the "Exif" prefix, and may compress
+    // EXIF and XMP. A compressed box can't be edited in place, so one that holds a
+    // location is turned into a `free` box (same length), which readers skip.
+    use crate::jxl::MetadataBox;
+    for found in crate::jxl::metadata_boxes(data)? {
+        let has_location = |check: &dyn Fn(&mut Vec<Patch>)| {
+            let mut inner = Vec::new();
+            check(&mut inner);
+            !inner.is_empty()
+        };
+        let type_at = match found {
+            MetadataBox::Exif { tiff } => {
+                tiff_patches(data, tiff, &mut patches);
+                continue;
+            }
+            MetadataBox::CompressedExif { type_at, tiff }
+                if has_location(&|p| tiff_patches(&tiff, 0, p)) =>
+            {
+                type_at
+            }
+            MetadataBox::CompressedXmp { type_at, xml }
+                if has_location(&|p| xmp_patches(&xml, 0, p)) =>
+            {
+                type_at
+            }
+            _ => continue,
+        };
+        patches.push(Patch {
+            offset: type_at as u64,
+            bytes: b"free".to_vec(),
+        });
     }
     // EXIF blocks wherever they are: JPEG APP1 segments (also inside embedded secondary
     // images), AVIF/HEIF Exif items, WebP EXIF chunks with the usual prefix.
@@ -138,7 +170,7 @@ fn image_patches(data: &[u8]) -> Vec<Patch> {
         }
     }
     xmp_patches(data, 0, &mut patches);
-    patches
+    Ok(patches)
 }
 
 /// Blanks the GPS directory of the TIFF/EXIF structure starting at `start`.
@@ -462,6 +494,46 @@ mod tests {
         apply(patches, 0, Bytes::copy_from_slice(data)).to_vec()
     }
 
+    #[test]
+    fn jpeg_xl_location_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        // Compressed EXIF (as cjxl writes it): the box is disabled.
+        let original = include_bytes!("../tests/fixtures/transcoded.jxl");
+        assert!(
+            info(dir.path(), "a.jxl", original, MediaKind::Image)
+                .latitude
+                .is_some()
+        );
+        let stripped = patched(original, &image_patches(original).unwrap());
+        let after = info(dir.path(), "b.jxl", &stripped, MediaKind::Image);
+        assert_eq!((after.latitude, after.camera_make), (None, None));
+        assert_eq!(after.width, Some(48), "still a valid image");
+        let path = dir.path().join("b.jxl");
+        assert!(
+            crate::preview::render(&path, crate::preview::Variant::Thumb, 1)
+                .unwrap()
+                .is_some()
+        );
+
+        // An uncompressed Exif box: just the GPS directory goes.
+        let mut container = b"\0\0\0\x0cJXL \r\n\x87\n".to_vec();
+        let tiff = testdata::exif_tiff("2023:06:15 14:30:00", Some((35.0, 139.0)));
+        container.extend_from_slice(&((tiff.len() + 12) as u32).to_be_bytes());
+        container.extend_from_slice(b"Exif\0\0\0\0");
+        container.extend_from_slice(&tiff);
+        let codestream = include_bytes!("../tests/fixtures/alpha.jxl");
+        container.extend_from_slice(&((codestream.len() + 8) as u32).to_be_bytes());
+        container.extend_from_slice(b"jxlc");
+        container.extend_from_slice(codestream);
+        let before = info(dir.path(), "c.jxl", &container, MediaKind::Image);
+        assert!(before.latitude.is_some() && before.taken_at.is_some());
+        let stripped = patched(&container, &image_patches(&container).unwrap());
+        let after = info(dir.path(), "d.jxl", &stripped, MediaKind::Image);
+        assert_eq!(after.latitude, None);
+        assert_eq!(after.taken_at, before.taken_at, "the rest is kept");
+        assert_eq!(after.width, Some(40));
+    }
+
     fn info(dir: &Path, name: &str, bytes: &[u8], kind: MediaKind) -> metadata::MediaInfo {
         let path = dir.join(name);
         std::fs::write(&path, bytes).unwrap();
@@ -478,7 +550,7 @@ mod tests {
                 .is_some()
         );
 
-        let patches = image_patches(&original);
+        let patches = image_patches(&original).unwrap();
         assert!(!patches.is_empty());
         let stripped = patched(&original, &patches);
         assert_eq!(stripped.len(), original.len());
@@ -494,9 +566,13 @@ mod tests {
 
     #[test]
     fn files_without_location_are_untouched() {
-        assert!(image_patches(&testdata::jpeg_with_exif()).is_empty());
-        assert!(image_patches(testdata::PNG_3X2).is_empty());
-        assert!(image_patches(b"not an image").is_empty());
+        assert!(
+            image_patches(&testdata::jpeg_with_exif())
+                .unwrap()
+                .is_empty()
+        );
+        assert!(image_patches(testdata::PNG_3X2).unwrap().is_empty());
+        assert!(image_patches(b"not an image").unwrap().is_empty());
     }
 
     #[test]
@@ -505,7 +581,7 @@ mod tests {
         data.extend_from_slice(
             br#"<?xpacket begin=""?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:Description exif:GPSLatitude="35,0.6N"/></x:xmpmeta><?xpacket end="w"?>"#,
         );
-        let stripped = patched(&data, &image_patches(&data));
+        let stripped = patched(&data, &image_patches(&data).unwrap());
         let text = String::from_utf8_lossy(&stripped);
         assert!(!text.contains("GPS") && !text.contains("35,0.6N"), "{text}");
         assert!(text.contains(r#"<?xpacket end="w"?>"#));
@@ -533,7 +609,7 @@ mod tests {
         png.extend(png_chunk(b"eXIf", tiff));
         png.extend(png_chunk(b"IEND", b""));
 
-        let patches = image_patches(&png);
+        let patches = image_patches(&png).unwrap();
         let stripped = patched(&png, &patches);
         let chunk = 33;
         let body = &stripped[chunk + 8..chunk + 8 + tiff.len()];
@@ -542,7 +618,10 @@ mod tests {
         crc_input.extend_from_slice(body);
         assert_eq!(crc, crc32fast::hash(&crc_input).to_be_bytes());
         assert_ne!(body, tiff, "GPS directory blanked");
-        assert!(image_patches(&stripped).is_empty(), "nothing left to strip");
+        assert!(
+            image_patches(&stripped).unwrap().is_empty(),
+            "nothing left to strip"
+        );
     }
 
     fn atom(typ: &[u8], body: &[u8]) -> Vec<u8> {

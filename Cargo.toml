@@ -13,6 +13,7 @@ anyhow = "1.0.104"
 argon2 = "0.6.0"
 axum = "0.8.9"
 axum-extra = { version = "0.12.6", features = ["cookie"] }
+brotli-decompressor = "5.0.3"
 bytes = "1.12.1"
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 cookie = "0.18"
@@ -26,6 +27,7 @@ image = { version = "0.25.10", default-features = false, features = ["png", "gif
 imagesize = "0.15.0"
 jpeg-decoder = "0.3.2"
 jpeg-encoder = "0.7.1"
+jxl-oxide = "0.12.6"
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 lru = "0.18.5"
 memchr = "2.8.3"

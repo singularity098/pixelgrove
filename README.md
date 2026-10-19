@@ -8,6 +8,8 @@ An ultra-light, fast, self-hosted photo and video library written in Rust.
   trash and a File View of the real folder tree.
 - Previews are made on the fly and kept only in memory: nothing is written next to your
   photos, and `/config` holds just a small database (about 20 MB for 100k files).
+- Photos in JPEG, PNG, WebP, GIF, AVIF and JPEG XL (shown in any browser: the server
+  converts it); videos in MP4, MOV and WebM.
 - Share a photo or folder with a link that needs no account.
 - Slideshows, nine colour themes (dark, light, AMOLED black, Dracula, Tokyo Night and the
   four Catppuccin flavours), works on phones (swipe from the left edge for the menu,
@@ -138,8 +140,10 @@ show items added later. Manage links under **Sharing**; admins see everyone's. S
 `PIXELGROVE_PUBLIC_URL` so links use your public address.
 
 Files opened through a share link have their **location removed**: GPS in photos'
-EXIF and XMP, and the location phones record in videos. Your files on disk are not
-changed, and signed-in users still see where photos were taken.
+EXIF and XMP, and the location phones record in videos. (JPEG XL files often keep EXIF
+compressed; when it holds a location, the shared copy leaves out that file's EXIF.)
+Your files on disk are not changed, and signed-in users still see where photos were
+taken.
 
 ## Slideshow
 

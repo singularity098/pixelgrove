@@ -70,6 +70,10 @@ pub enum Preview {
 pub struct Previews {
     cache: Mutex<SizedLru>,
     permits: Semaphore,
+    /// JPEG XL decodes one at a time: each holds the whole image in memory (a 12
+    /// megapixel photo peaks around 200-450 MB) and already uses every core. Taken
+    /// before `permits`, so a grid of them doesn't hold up other previews.
+    jxl: Semaphore,
     /// Makes video thumbnails, when ffmpeg is installed.
     ffmpeg: Option<crate::video::Ffmpeg>,
 }
@@ -89,6 +93,7 @@ impl Previews {
         Self {
             cache: Mutex::new(SizedLru::new(cache_bytes)),
             permits: Semaphore::new(workers),
+            jxl: Semaphore::new(1),
             ffmpeg: None,
         }
     }
@@ -138,6 +143,11 @@ impl Previews {
         if let Some(bytes) = self.cache.lock().unwrap().get(&key) {
             return Ok(Preview::Jpeg(bytes));
         }
+        let _jxl = if crate::jxl::is_jxl(path) {
+            Some(self.jxl.acquire().await?)
+        } else {
+            None
+        };
         let _permit = self.permits.acquire().await?;
         // Another request may have produced it while we waited.
         if let Some(bytes) = self.cache.lock().unwrap().get(&key) {
@@ -160,7 +170,7 @@ impl Previews {
 }
 
 /// Renders a preview as JPEG, or `None` if the original should be served instead.
-pub fn render(path: &Path, variant: Variant, orientation: u16) -> Result<Option<Vec<u8>>> {
+pub fn render(path: &Path, variant: Variant, mut orientation: u16) -> Result<Option<Vec<u8>>> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -168,7 +178,29 @@ pub fn render(path: &Path, variant: Variant, orientation: u16) -> Result<Option<
         .unwrap_or_default();
     let file_size = std::fs::metadata(path)?.len();
     let pixels = match ext.as_str() {
-        "jpg" | "jpeg" => decode_jpeg(path, variant)?,
+        "jpg" | "jpeg" => decode_jpeg(File::open(path)?, variant)?,
+        // Browsers mostly can't show JPEG XL, so it's always converted. Its orientation
+        // is in the image header: rendered pixels come out upright, a rebuilt JPEG
+        // needs turning.
+        "jxl" => match crate::jxl::decode(path)? {
+            crate::jxl::Decoded::Jpeg {
+                jpeg,
+                orientation: o,
+            } => {
+                orientation = o;
+                decode_jpeg(std::io::Cursor::new(jpeg), variant)?
+            }
+            crate::jxl::Decoded::Rgb {
+                width,
+                height,
+                data,
+            } => Pixels {
+                width,
+                height,
+                channels: 3,
+                data,
+            },
+        },
         "png" | "webp" | "gif" => {
             if file_size < SERVE_ORIGINAL_BELOW
                 && let Ok(size) = imagesize::size(path)
@@ -185,6 +217,7 @@ pub fn render(path: &Path, variant: Variant, orientation: u16) -> Result<Option<
     if (width, height) == (pixels.width, pixels.height)
         && file_size < SERVE_ORIGINAL_BELOW
         && orientation == 1
+        && ext != "jxl"
     {
         return Ok(None);
     }
@@ -201,9 +234,8 @@ struct Pixels {
     data: Vec<u8>,
 }
 
-fn decode_jpeg(path: &Path, variant: Variant) -> Result<Pixels> {
-    let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
-    let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
+fn decode_jpeg(source: impl std::io::Read, variant: Variant) -> Result<Pixels> {
+    let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(source));
     decoder.read_info()?;
     let info = decoder.info().context("JPEG has no image info")?;
     let (w, h) = variant.target(u32::from(info.width), u32::from(info.height));

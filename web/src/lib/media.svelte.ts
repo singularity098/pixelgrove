@@ -211,3 +211,19 @@ export function formatBytes(bytes: number): string {
   }
   return `${value.toFixed(unit === 0 || value >= 10 ? 0 : 1)} ${units[unit]}`;
 }
+
+/** Whether this browser shows JPEG XL itself (Safari does; most don't yet). Until
+ *  known, and where it doesn't, JPEG XL photos are shown as server-made previews. */
+export const jxlSupport = $state({ supported: false });
+{
+  const probe = new Image();
+  probe.onload = () => (jxlSupport.supported = probe.naturalWidth === 40);
+  probe.src =
+    'data:image/jxl;base64,/wroMLChuBAASIAoABQCXeUSAAAVKqOMG7yc6/nyQ4fFtI3rDG21bWFJ4hjRM61tDl6djMAht/KgAMCHMwQpKLAhJ2OMMU6cGDxPnBiHbjBiMBOI4U/GCHgI/E5TH/B9wPcDMwDfB3wf8H2XBMD3Ad8Hlg9UHQNVVScrVFVVQQYZAJrvALg534sBw7osOMwERqwkAQ==';
+}
+
+/** Whether `name` is a file the browser can't show as is (so the viewer keeps to the
+ *  server-made preview, even zoomed in). */
+export function needsPreview(name: string): boolean {
+  return /\.jxl$/i.test(name) && !jxlSupport.supported;
+}

@@ -6,6 +6,7 @@
     formatDate,
     formatDuration,
     libraryUrls,
+    needsPreview,
     type MediaDetail,
     type MediaItem,
     type MediaUrls,
@@ -361,7 +362,7 @@
   }
 
   // Zooming in swaps to the original, when it may be fetched.
-  const original = $derived(urls.file(item));
+  const original = $derived(needsPreview(item.name) ? null : urls.file(item));
   const src = $derived(
     item.kind === 'image' ? (wantOriginal && original ? original : urls.large(item)) : (original ?? ''),
   );

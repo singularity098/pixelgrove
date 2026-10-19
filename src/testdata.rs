@@ -94,7 +94,7 @@ fn dms(tag: u16, degrees: f64) -> Entry {
 
 /// Lays out IFDs one after another, each followed by its out-of-line values.
 /// The IFD0 pointer entries (0x8769 Exif, 0x8825 GPS) are patched to the later IFDs.
-fn exif_tiff(datetime: &str, gps: Option<(f64, f64)>) -> Vec<u8> {
+pub fn exif_tiff(datetime: &str, gps: Option<(f64, f64)>) -> Vec<u8> {
     let mut ifds: Vec<Vec<Entry>> = vec![
         vec![
             ascii(0x010F, "PixelCam"),

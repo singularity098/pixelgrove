@@ -28,11 +28,15 @@ decisions made while reviewing them and the plan for building v1.
 As built (M3): JPEGs are decoded at 1/2–1/8 scale straight from DCT data, which makes a
 thumbnail (shorter edge 360 px) of a 12 MP photo take ~20–30 ms uncached; the viewer
 image (longer edge 2048 px) ~230 ms. EXIF orientation is applied to previews. PNG/WebP/GIF
-are decoded fully; AVIF and small files are served as-is. Zooming in the viewer loads
-the original. Browse API calls take 1–4 ms at 100k files.
+are decoded fully; AVIF and small files are served as-is. JPEG XL (jxl-oxide, pure
+Rust) is always converted, since most browsers can't show it: files transcoded from
+JPEG are rebuilt as that JPEG and DCT-scaled (~0.7 s for 12 MP), others fully decoded
+(~0.7–1.1 s, peaking at ~200–450 MB, so one at a time). Its EXIF comes from the `Exif`
+box, Brotli-compressed or not. Zooming in the viewer loads the original (for JPEG XL
+only where the browser shows it). Browse API calls take 1–4 ms at 100k files.
 
 ### Media
-- **v1 formats:** JPEG, PNG, WebP, GIF, AVIF; video MP4, WebM, MOV.
+- **v1 formats:** JPEG, PNG, WebP, GIF, AVIF, JPEG XL; video MP4, WebM, MOV.
 - **Later:** HEIC, RAW (CR2/NEF/ARW/DNG), MKV/AVI.
 - **Video tiles:** one frame about a second in, extracted by a bundled minimal FFmpeg
   (static, ~11 MB: MP4/MOV/MKV/WebM in; H.264, HEVC, VP8/9, MPEG-4, MJPEG, ProRes; JPEG

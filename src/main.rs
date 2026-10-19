@@ -5,6 +5,7 @@ mod auth;
 mod config;
 mod db;
 mod indexer;
+mod jxl;
 mod location;
 mod metadata;
 mod places;

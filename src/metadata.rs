@@ -27,7 +27,7 @@ impl MediaKind {
 pub fn kind_for_path(path: &Path) -> Option<MediaKind> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     match ext.as_str() {
-        "jpg" | "jpeg" | "png" | "webp" | "gif" | "avif" => Some(MediaKind::Image),
+        "jpg" | "jpeg" | "png" | "webp" | "gif" | "avif" | "jxl" => Some(MediaKind::Image),
         "mp4" | "m4v" | "webm" | "mov" => Some(MediaKind::Video),
         _ => None,
     }
@@ -64,6 +64,7 @@ pub fn mtime_secs(meta: &FsMetadata) -> i64 {
 pub fn read(parser: &mut MediaParser, path: &Path, kind: MediaKind) -> MediaInfo {
     let mut info = MediaInfo::default();
     match kind {
+        MediaKind::Image if crate::jxl::is_jxl(path) => read_jxl(parser, path, &mut info),
         MediaKind::Image => read_image(parser, path, &mut info),
         MediaKind::Video => read_video(parser, path, &mut info),
     }
@@ -84,6 +85,28 @@ fn read_image(parser: &mut MediaParser, path: &Path, info: &mut MediaInfo) {
     if source.kind() != SourceKind::Image {
         return;
     }
+    read_exif(parser, source, info);
+}
+
+/// JPEG XL: EXIF from its `Exif` box, and the size from the image header, which also
+/// holds the orientation (EXIF orientation doesn't apply; previews come out upright).
+fn read_jxl(parser: &mut MediaParser, path: &Path, info: &mut MediaInfo) {
+    if let Some(tiff) = crate::jxl::exif(path)
+        && let Ok(source) = MediaSource::from_memory(tiff)
+    {
+        read_exif(parser, source, info);
+    }
+    let size = crate::jxl::dimensions(path);
+    info.width = size.map(|s| s.0);
+    info.height = size.map(|s| s.1);
+    info.orientation = None;
+}
+
+fn read_exif<R: std::io::Read>(
+    parser: &mut MediaParser,
+    source: MediaSource<R>,
+    info: &mut MediaInfo,
+) {
     let Ok(iter) = parser.parse_exif(source) else {
         return;
     };
