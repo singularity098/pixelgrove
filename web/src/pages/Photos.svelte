@@ -3,11 +3,53 @@
   import { formatDate, PagedList, type Album } from '../lib/media.svelte';
   import { link, onVisible } from '../lib/router.svelte';
 
-  const albums = new PagedList<Album>('/albums', 60);
+  const SORTS = [
+    ['newest', 'Newest first'],
+    ['oldest', 'Oldest first'],
+    ['name', 'Name'],
+    ['count', 'Most photos'],
+  ] as const;
+  type Sort = (typeof SORTS)[number][0];
+  // Remembered per device, like the theme.
+  const SORT_KEY = 'pixelgrove-folder-sort';
+
+  const initialSort = readSort();
+  let sort: Sort = $state(initialSort);
+  let albums = $state(new PagedList<Album>(`/albums?sort=${initialSort}`, 60));
+
+  function readSort(): Sort {
+    try {
+      const saved = localStorage.getItem(SORT_KEY);
+      return SORTS.find(([id]) => id === saved)?.[0] ?? 'newest';
+    } catch {
+      return 'newest';
+    }
+  }
+
+  function changeSort(event: Event) {
+    // Read the choice from the menu: the binding may update after this handler.
+    sort = (event.currentTarget as HTMLSelectElement).value as Sort;
+    albums = new PagedList<Album>(`/albums?sort=${sort}`, 60);
+    window.scrollTo({ top: 0 });
+    // The end-of-list marker may already be in view, so it wouldn't ask by itself.
+    albums.more();
+    try {
+      localStorage.setItem(SORT_KEY, sort);
+    } catch {
+      // Not remembered; fine.
+    }
+  }
 </script>
 
 <section class="page wide">
-  <h2>Photos</h2>
+  <div class="heading">
+    <h2>Photos</h2>
+    <select class="sort" aria-label="Sort folders" value={sort} onchange={changeSort}>
+      {#each SORTS as [id, label] (id)}
+        <option value={id}>{label}</option>
+      {/each}
+    </select>
+  </div>
   {#if albums.total === 0}
     <p class="muted">No photos yet. Add folders under <code>/media</code> and they'll appear here once scanned.</p>
   {/if}
@@ -27,6 +69,28 @@
 </section>
 
 <style>
+  .heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .heading h2 {
+    margin: 0;
+  }
+
+  .sort {
+    margin: 0;
+    padding: 7px 10px;
+    font: inherit;
+    font-size: 0.9rem;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
   .albums {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
@@ -82,8 +146,8 @@
 
   @media (max-width: 520px) {
     .albums {
-      /* Same column count as photo grids (the header's columns button, lib/columns.ts). */
-      grid-template-columns: repeat(var(--phone-columns, 3), 1fr);
+      /* Picked with the header's columns button (lib/columns.ts). */
+      grid-template-columns: repeat(var(--folder-columns, 2), 1fr);
       gap: 14px 8px;
     }
 

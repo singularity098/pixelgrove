@@ -3,6 +3,11 @@
 try {
   const theme = localStorage.getItem('pixelgrove-theme');
   if (theme && /^[a-z-]+$/.test(theme)) document.documentElement.dataset.theme = theme;
-  const columns = localStorage.getItem('pixelgrove-columns');
-  if (columns && /^[234]$/.test(columns)) document.documentElement.style.setProperty('--phone-columns', columns);
+  for (const [key, variable] of [
+    ['pixelgrove-columns', '--phone-columns'],
+    ['pixelgrove-folder-columns', '--folder-columns'],
+  ]) {
+    const columns = localStorage.getItem(key);
+    if (columns && /^[234]$/.test(columns)) document.documentElement.style.setProperty(variable, columns);
+  }
 } catch {}

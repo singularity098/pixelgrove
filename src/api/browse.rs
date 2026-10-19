@@ -169,13 +169,53 @@ pub struct Paged<T> {
 }
 
 /// The default Photos view: every folder that directly contains media, newest first.
+/// How the Photos page orders folders.
+#[derive(Deserialize, Default, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum AlbumSort {
+    /// By each folder's newest photo, newest first.
+    #[default]
+    Newest,
+    /// The reverse; folders without dated photos stay last.
+    Oldest,
+    Name,
+    /// Most photos and videos first.
+    Count,
+}
+
+impl AlbumSort {
+    fn order_by(self) -> &'static str {
+        match self {
+            AlbumSort::Newest => "v.latest DESC, v.id DESC",
+            AlbumSort::Oldest => "v.latest IS NULL, v.latest ASC, v.id ASC",
+            AlbumSort::Name => "v.name COLLATE NOCASE, v.id",
+            AlbumSort::Count => "v.n DESC, v.latest DESC, v.id DESC",
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct AlbumQuery {
+    #[serde(default)]
+    offset: i64,
+    #[serde(default = "default_limit")]
+    limit: i64,
+    #[serde(default)]
+    sort: AlbumSort,
+}
+
 pub async fn albums(
     State(state): State<AppState>,
     current: CurrentUser,
-    Query(page): Query<Page>,
+    Query(query): Query<AlbumQuery>,
 ) -> ApiResult<Json<Paged<Album>>> {
     let user = current.user;
-    let (offset, limit) = page.clamped();
+    let (offset, limit) = Page {
+        offset: query.offset,
+        limit: query.limit,
+    }
+    .clamped();
+    let order_by = query.sort.order_by();
     let result = state
         .db
         .run(move |conn| {
@@ -215,7 +255,7 @@ pub async fn albums(
                  JOIN roots r ON r.id = v.root_id
                  LEFT JOIN media m ON m.id = v.cover_id
                  WHERE v.n > 0
-                 ORDER BY v.latest DESC, v.id DESC
+                 ORDER BY {order_by}
                  LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)"
             ))?;
             let items = stmt
@@ -646,6 +686,24 @@ mod tests {
             .send("GET", "/api/albums?offset=1&limit=1", None, Some(&admin))
             .await;
         assert_eq!(names(&page.body["items"]), ["trip"]);
+
+        let sorted = |sort: &str| {
+            let (app, admin) = (&app, &admin);
+            let uri = format!("/api/albums?sort={sort}");
+            async move { names(&app.send("GET", &uri, None, Some(admin)).await.body["items"]) }
+        };
+        assert_eq!(sorted("oldest").await, ["x", "trip", "2024"]);
+        assert_eq!(sorted("name").await, ["2024", "trip", "x"]);
+        assert_eq!(sorted("count").await[0], "trip");
+        let page = app
+            .send(
+                "GET",
+                "/api/albums?sort=oldest&offset=2&limit=1",
+                None,
+                Some(&admin),
+            )
+            .await;
+        assert_eq!(names(&page.body["items"]), ["2024"]);
     }
 
     #[tokio::test]
