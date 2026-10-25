@@ -1,4 +1,4 @@
-# PixelGrove
+# <picture><source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg"><img src="docs/logo-light.svg" alt="PixelGrove" height="84"></picture>
 
 An ultra-light, fast, self-hosted photo and video library written in Rust.
 

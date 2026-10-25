@@ -47,9 +47,10 @@ tests/fixtures/      binary fixtures (JPEG XL)
 web/                 Svelte 5 (runes) + Vite + TypeScript UI
   src/pages/         one component per route; src/components/ shared UI
   src/lib/           router (history API + scroll restoration), api client, lists
-  public/            sw.js, theme-init.js (runs before paint; no inline scripts: CSP)
+  public/            sw.js, theme-init.js (runs before paint; no inline scripts: CSP),
+                     favicon.svg (the logo icon) and the PNG app icons rendered from it
 data/cities.tsv      geocoding data, embedded
-docs/                requirements.md, plan.md, screenshots/
+docs/                requirements.md, plan.md, screenshots/, logo-{dark,light}.svg (README)
 scripts/screenshots/ demo library + Playwright script for README screenshots
 Dockerfile           web build → cross-compiled static musl binary → static FFmpeg → scratch
 ```
@@ -112,6 +113,9 @@ cd web && npm ci && npm run check && npm run build   # check = svelte-check --fa
 - Svelte: runes (`$state`, `$derived`, `$effect`), no stores. Per-device preferences in
   `localStorage`, always wrapped in try/catch. Colours come from theme CSS variables in
   `app.css` (`[data-theme]`, `[data-mode]`); there are nine themes.
+- The logo is the leaf-aperture icon (`favicon.svg`) plus the "PixelGrove" wordmark in
+  Syne Bold, converted to outlines in `components/Logo.svelte` so no font ships. If the
+  icon changes, re-render the PNG icons from it and rebuild `docs/logo-*.svg`.
 - The CSP forbids inline scripts; anything that must run before paint lives in
   `web/public/theme-init.js`.
 - Tests sit next to the code (`#[cfg(test)]`); API tests use `TestApp` in `api/mod.rs`.

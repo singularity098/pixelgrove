@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
+  import Logo from '../components/Logo.svelte';
   import MediaGrid from '../components/MediaGrid.svelte';
   import MoreSpace from '../components/MoreSpace.svelte';
   import MediaViewerHost from '../components/MediaViewerHost.svelte';
@@ -64,7 +65,7 @@
 </script>
 
 <header>
-  <span class="brand"><img src="/favicon.svg" alt="" width="24" height="24" /> PixelGrove</span>
+  <Logo />
   <div class="spacer"></div>
   <ThemeMenu />
 </header>
@@ -170,12 +171,6 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 600;
-  }
 
   .spacer {
     flex: 1;

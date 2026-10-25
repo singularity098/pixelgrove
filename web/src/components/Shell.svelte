@@ -8,6 +8,7 @@
   import Storage from './Storage.svelte';
   import ColumnsButton from './ColumnsButton.svelte';
   import ThemeMenu from './ThemeMenu.svelte';
+  import Logo from './Logo.svelte';
 
   let { user, children }: { user: User; children: Snippet } = $props();
 
@@ -200,8 +201,7 @@
       <Icon name="menu" />
     </button>
     <a class="brand" href="/" onclick={link}>
-      <img src="/favicon.svg" alt="" width="26" height="26" />
-      <span>PixelGrove</span>
+      <Logo />
     </a>
     <form class="search" class:open={searchOpen} role="search" onsubmit={submitSearch}>
       <Icon name="search" size={18} />
@@ -302,10 +302,6 @@
   .brand {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    font-size: 1.05rem;
-    color: var(--text);
     text-decoration: none;
   }
 
