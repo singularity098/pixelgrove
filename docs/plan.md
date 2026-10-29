@@ -50,7 +50,10 @@ only where the browser shows it). Browse API calls take 1–4 ms at 100k files.
   (`video::Ffmpeg::remux`): H.264/HEVC/VP9/AV1 picture copied untouched, audio other than
   AAC/MP3 re-encoded to stereo AAC, nothing written to disk. The stream isn't seekable by
   the browser, so the viewer has its own seek bar (`StreamPlayer.svelte`) that restarts
-  the stream from the new time (`file?t=`); seeks land on the keyframe before it. Other
+  the stream from the new time (`file?t=`); seeks land on the keyframe before it, sound
+  included. Tracks that start at different times (delayed audio is common in MKV) keep
+  their offsets through MP4 edit lists (`delay_moov`); an empty moov alone can't carry
+  them, and the sound would play early. Other
   video codecs (MPEG-2, VC-1...), or no FFmpeg: the original file is played instead.
   Downloads are always the original. Measured (1080p H.264 + 5.1 AC-3): probing 90 ms,
   first megabyte after a seek ~125 ms, a whole 2-minute clip remuxed in 4.3 s of CPU

@@ -139,6 +139,8 @@ impl Ffmpeg {
     /// streamed from `start` seconds in. The picture is copied as is; audio that isn't
     /// AAC or MP3 (AC-3, DTS, FLAC, Opus...) becomes stereo AAC. `None` when the video
     /// codec isn't one browsers play from MP4, so the original is the better bet.
+    /// A copied picture can only start at a keyframe, so a stream from `start` really
+    /// begins at the keyframe before it, and the sound starts there too.
     /// The process stops when the returned stream is dropped (the viewer seeks or closes).
     pub async fn remux(
         &self,
@@ -160,7 +162,10 @@ impl Ffmpeg {
         let mut cmd = Command::new(&self.path);
         cmd.args(["-nostdin", "-v", "error"]);
         if start > 0.0 {
-            cmd.args(["-ss", &format!("{start:.3}")]);
+            // Without -noaccurate_seek the sound would start at `start` exactly while the
+            // copied picture starts at the keyframe before it, up to a GOP (often several
+            // seconds) earlier; both would then play from 0 and the sound would run early.
+            cmd.args(["-ss", &format!("{start:.3}"), "-noaccurate_seek"]);
         }
         cmd.arg("-i")
             .arg(file)
@@ -175,9 +180,16 @@ impl Ffmpeg {
             }
         }
         // Tags (location among them) and chapters stay behind: this is for watching.
+        // Streams in a Matroska file needn't start together (sound delayed by a second or
+        // two is common). An empty moov can't say so, and ffmpeg then starts every track
+        // at 0; delay_moov writes the moov after the first fragment, with edit lists that
+        // keep each track's own start.
         cmd.args(["-map_metadata", "-1", "-map_chapters", "-1"])
             .args(["-avoid_negative_ts", "make_zero"])
-            .args(["-movflags", "frag_keyframe+empty_moov+default_base_moof"])
+            .args([
+                "-movflags",
+                "frag_keyframe+empty_moov+default_base_moof+delay_moov",
+            ])
             .args(["-f", "mp4", "-"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -420,6 +432,62 @@ At least one output file must be specified";
             .await
             .unwrap();
         assert!(missing.is_none());
+    }
+
+    /// Sound that starts after the picture (common in Matroska) must keep its delay in
+    /// the MP4, or it plays early. Skipped where ffmpeg isn't installed.
+    #[tokio::test]
+    async fn remux_keeps_delayed_audio_in_sync() {
+        let Some(ffmpeg) = Ffmpeg::detect("ffmpeg").await else {
+            eprintln!("ffmpeg not installed; skipping");
+            return;
+        };
+        let clip = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/clip.mkv");
+        let dir = tempfile::tempdir().unwrap();
+        let delayed = dir.path().join("delayed.mkv");
+        let ok = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(&clip)
+            .args(["-itsoffset", "0.5", "-i"])
+            .arg(&clip)
+            .args(["-map", "0:v", "-map", "1:a", "-c", "copy"])
+            .arg(&delayed)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+
+        let stream = ffmpeg.remux(&delayed, 0.0).await.unwrap().unwrap();
+        let chunks: Vec<_> = futures_util::StreamExt::collect(stream).await;
+        let mp4: Vec<u8> = chunks.into_iter().flat_map(Result::unwrap).collect();
+        let out = dir.path().join("out.mp4");
+        std::fs::write(&out, mp4).unwrap();
+        let lag = first_pts(&out, "a") - first_pts(&out, "v");
+        assert!(
+            (lag - 0.5).abs() < 0.05,
+            "sound starts {lag:.3} s after the picture"
+        );
+    }
+
+    /// When the first packet of `stream` ("v" or "a") in `file` plays, in seconds.
+    fn first_pts(file: &Path, stream: &str) -> f64 {
+        let out = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-copyts", "-i"])
+            .arg(file)
+            .args(["-map", &format!("0:{stream}"), "-c", "copy", "-frames", "1"])
+            .args(["-f", "framecrc", "-"])
+            .output()
+            .unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        // "#tb 0: 1/48000", then packets as "0, dts, pts, duration, size, crc".
+        let tb = text
+            .lines()
+            .find_map(|l| l.strip_prefix("#tb 0: "))
+            .unwrap();
+        let (num, den) = tb.split_once('/').unwrap();
+        let packet = text.lines().find(|l| !l.starts_with('#')).unwrap();
+        let pts: f64 = packet.split(',').nth(2).unwrap().trim().parse().unwrap();
+        pts * num.parse::<f64>().unwrap() / den.parse::<f64>().unwrap()
     }
 
     fn image_size(jpeg: &[u8]) -> (usize, usize) {

@@ -145,5 +145,9 @@ cd web && npm ci && npm run check && npm run build   # check = svelte-check --fa
 - A streamed (non-range) `<video>` source can't be seeked: Chromium reports a zero-length
   seekable range and clamps every seek to 0, even within what's buffered. MKV playback
   (`StreamPlayer.svelte`) restarts the stream with `?t=` instead.
+- Fragmented MP4 with a plain `empty_moov` starts every track at 0, so MKV sound that
+  starts late (or after a seek, where copied video starts at the earlier keyframe) plays
+  early. The remux uses `delay_moov` (edit lists) and `-noaccurate_seek`. Headless
+  Chromium has no AAC or H.264 decoder: check sync with VP9 + Opus in MP4.
 - Shell safety: don't `rm -rf` variables or top-level paths in commands; the session's
   safety check blocks them (and blocks the whole command, including edits in it).
