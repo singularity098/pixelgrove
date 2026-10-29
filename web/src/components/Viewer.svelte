@@ -14,7 +14,8 @@
   import Icon from './Icon.svelte';
   import ShareDialog from './ShareDialog.svelte';
   import Slideshow from './Slideshow.svelte';
-  import { releaseOnDestroy } from '../lib/video';
+  import StreamPlayer from './StreamPlayer.svelte';
+  import { releaseOnDestroy, streamed } from '../lib/video';
 
   let {
     items,
@@ -491,7 +492,9 @@
       onpointercancel={onpointerup}
       role="presentation">
       {#key item.id}
-        {#if item.kind === 'video'}
+        {#if item.kind === 'video' && streamed(item.name)}
+          <StreamPlayer src={src} poster={urls.large(item)} durationMs={item.duration_ms} />
+        {:else if item.kind === 'video'}
           <!-- svelte-ignore a11y_media_has_caption -->
           <video src={src} poster={urls.large(item)} controls autoplay playsinline use:releaseOnDestroy></video>
         {:else}

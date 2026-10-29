@@ -36,15 +36,25 @@ box, Brotli-compressed or not. Zooming in the viewer loads the original (for JPE
 only where the browser shows it). Browse API calls take 1–4 ms at 100k files.
 
 ### Media
-- **v1 formats:** JPEG, PNG, WebP, GIF, AVIF, JPEG XL; video MP4, WebM, MOV.
-- **Later:** HEIC, RAW (CR2/NEF/ARW/DNG), MKV/AVI.
+- **v1 formats:** JPEG, PNG, WebP, GIF, AVIF, JPEG XL; video MP4, WebM, MOV, MKV.
+- **Later:** HEIC, RAW (CR2/NEF/ARW/DNG), AVI.
 - **Video tiles:** one frame about a second in, extracted by a bundled minimal FFmpeg
-  (static, ~11 MB: MP4/MOV/MKV/WebM in; H.264, HEVC, VP8/9, MPEG-4, MJPEG, ProRes; JPEG
-  out), kept in the in-memory preview cache like photo previews; the newest 1,000 are made
+  (static: MP4/MOV/MKV/WebM in; H.264, HEVC, VP8/9, MPEG-4, MJPEG, ProRes; JPEG out; plus
+  common audio decoders, AAC and the MP4 muxer for MKV playback), kept in the in-memory preview cache like photo previews; the newest 1,000 are made
   after each scan. Without FFmpeg, browsers grab a frame themselves. Measured: 24 tiles of
   4K HEVC and 1080p H.264 phone videos in under 1 s (0.4 MB), against 10 of 24 after 30 s
   (10.5 MB) when the browser had to do it.
 - Video is streamed directly with HTTP range requests (seeking works).
+- **MKV:** Safari can't open Matroska and few browsers play the AC-3/DTS audio it often
+  carries, so the viewer gets MKV through FFmpeg, repackaged as fragmented MP4 on the fly
+  (`video::Ffmpeg::remux`): H.264/HEVC/VP9/AV1 picture copied untouched, audio other than
+  AAC/MP3 re-encoded to stereo AAC, nothing written to disk. The stream isn't seekable by
+  the browser, so the viewer has its own seek bar (`StreamPlayer.svelte`) that restarts
+  the stream from the new time (`file?t=`); seeks land on the keyframe before it. Other
+  video codecs (MPEG-2, VC-1...), or no FFmpeg: the original file is played instead.
+  Downloads are always the original. Measured (1080p H.264 + 5.1 AC-3): probing 90 ms,
+  first megabyte after a seek ~125 ms, a whole 2-minute clip remuxed in 4.3 s of CPU
+  (~28× real time, mostly the audio).
 - **Timestamp:** EXIF `DateTimeOriginal` (or video creation time), falling back to file mtime.
 
 ### Views

@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use bytes::Bytes;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use crate::db::Db;
@@ -113,6 +115,136 @@ impl Ffmpeg {
             bail!("ffmpeg failed: {}", err.lines().next().unwrap_or_default());
         }
         Ok(out.stdout)
+    }
+
+    /// The first real video and audio streams in `file` (cover art doesn't count), read
+    /// from ffmpeg's description of its input: it only reads the file's header.
+    pub async fn probe(&self, file: &Path) -> Result<Streams> {
+        let mut cmd = Command::new(&self.path);
+        cmd.args(["-nostdin", "-hide_banner", "-i"])
+            .arg(file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        // No output is named, so ffmpeg always "fails" after describing the input.
+        let out = tokio::time::timeout(TIMEOUT, cmd.output())
+            .await
+            .context("ffmpeg timed out")?
+            .context("running ffmpeg")?;
+        Ok(Streams::parse(&String::from_utf8_lossy(&out.stderr)))
+    }
+
+    /// Repackages a video browsers can decode but not open (Matroska) as fragmented MP4,
+    /// streamed from `start` seconds in. The picture is copied as is; audio that isn't
+    /// AAC or MP3 (AC-3, DTS, FLAC, Opus...) becomes stereo AAC. `None` when the video
+    /// codec isn't one browsers play from MP4, so the original is the better bet.
+    /// The process stops when the returned stream is dropped (the viewer seeks or closes).
+    pub async fn remux(
+        &self,
+        file: &Path,
+        start: f64,
+    ) -> Result<Option<impl futures_util::Stream<Item = std::io::Result<Bytes>> + use<>>> {
+        let streams = self.probe(file).await?;
+        let Some(video) = streams.video else {
+            return Ok(None);
+        };
+        let tag = match video.codec.as_str() {
+            "h264" => "avc1",
+            // Safari plays HEVC from MP4 only when it's tagged hvc1.
+            "hevc" => "hvc1",
+            "vp9" => "vp09",
+            "av1" => "av01",
+            _ => return Ok(None),
+        };
+        let mut cmd = Command::new(&self.path);
+        cmd.args(["-nostdin", "-v", "error"]);
+        if start > 0.0 {
+            cmd.args(["-ss", &format!("{start:.3}")]);
+        }
+        cmd.arg("-i")
+            .arg(file)
+            .args(["-map", &format!("0:{}", video.index)])
+            .args(["-c:v", "copy", "-tag:v", tag]);
+        if let Some(audio) = &streams.audio {
+            cmd.args(["-map", &format!("0:{}", audio.index)]);
+            if matches!(audio.codec.as_str(), "aac" | "mp3") {
+                cmd.args(["-c:a", "copy"]);
+            } else {
+                cmd.args(["-c:a", "aac", "-b:a", "192k", "-ac", "2"]);
+            }
+        }
+        // Tags (location among them) and chapters stay behind: this is for watching.
+        cmd.args(["-map_metadata", "-1", "-map_chapters", "-1"])
+            .args(["-avoid_negative_ts", "make_zero"])
+            .args(["-movflags", "frag_keyframe+empty_moov+default_base_moof"])
+            .args(["-f", "mp4", "-"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let mut child = cmd.spawn().context("running ffmpeg")?;
+        let stdout = child.stdout.take().context("ffmpeg has no stdout")?;
+        Ok(Some(futures_util::stream::unfold(
+            (child, stdout),
+            |(child, mut stdout)| async move {
+                let mut buf = vec![0; 64 * 1024];
+                match stdout.read(&mut buf).await {
+                    Ok(0) => None,
+                    Ok(n) => {
+                        buf.truncate(n);
+                        Some((Ok(Bytes::from(buf)), (child, stdout)))
+                    }
+                    Err(err) => Some((Err(err), (child, stdout))),
+                }
+            },
+        )))
+    }
+}
+
+/// What `Ffmpeg::probe` found.
+#[derive(Debug, Default, PartialEq)]
+pub struct Streams {
+    pub video: Option<Stream>,
+    pub audio: Option<Stream>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Stream {
+    /// The stream's index in the file, for `-map 0:N`.
+    pub index: u32,
+    pub codec: String,
+}
+
+impl Streams {
+    /// Reads lines like `  Stream #0:1(eng): Audio: ac3, 48000 Hz, 5.1(side), ...`.
+    fn parse(description: &str) -> Self {
+        let mut streams = Self::default();
+        for line in description.lines() {
+            let Some(rest) = line.trim_start().strip_prefix("Stream #0:") else {
+                continue;
+            };
+            let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+            let Ok(index) = rest[..digits].parse() else {
+                continue;
+            };
+            let codec_of = |kind: &str| {
+                let after = &rest[rest.find(kind)? + kind.len()..];
+                let codec = after.split([' ', ',']).next()?;
+                (!codec.is_empty()).then(|| codec.to_string())
+            };
+            if streams.video.is_none()
+                && !line.contains("(attached pic)")
+                && let Some(codec) = codec_of(": Video: ")
+            {
+                streams.video = Some(Stream { index, codec });
+            } else if streams.audio.is_none()
+                && let Some(codec) = codec_of(": Audio: ")
+            {
+                streams.audio = Some(Stream { index, codec });
+            }
+        }
+        streams
     }
 }
 
@@ -241,6 +373,53 @@ mod tests {
             .frame(&dir.path().join("nope.mp4"), Variant::Thumb, None)
             .await;
         assert!(missing.is_err());
+    }
+
+    #[test]
+    fn reads_streams_from_the_description() {
+        let description = "Input #0, matroska,webm, from 'film.mkv':
+  Duration: 01:42:10.05, start: 0.000000, bitrate: 9000 kb/s
+  Stream #0:0: Video: mjpeg (Baseline), yuvj420p, 600x900 (attached pic)
+  Stream #0:1(eng): Video: hevc (Main 10), yuv420p10le(tv), 3840x2160, 23.98 fps (default)
+  Stream #0:2(eng): Audio: eac3, 48000 Hz, 5.1(side), fltp, 640 kb/s (default)
+  Stream #0:3(jpn): Audio: aac (LC), 48000 Hz, stereo, fltp
+  Stream #0:4(eng): Subtitle: subrip
+At least one output file must be specified";
+        let streams = Streams::parse(description);
+        let stream = |index, codec: &str| Stream {
+            index,
+            codec: codec.into(),
+        };
+        assert_eq!(streams.video, Some(stream(1, "hevc")));
+        assert_eq!(streams.audio, Some(stream(2, "eac3")));
+        assert_eq!(Streams::parse("garbage"), Streams::default());
+    }
+
+    /// The test clip is VP9 with AC-3 audio; skipped where ffmpeg isn't installed.
+    #[tokio::test]
+    async fn remuxes_matroska_to_fragmented_mp4() {
+        let Some(ffmpeg) = Ffmpeg::detect("ffmpeg").await else {
+            eprintln!("ffmpeg not installed; skipping");
+            return;
+        };
+        let clip = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/clip.mkv");
+        let streams = ffmpeg.probe(&clip).await.unwrap();
+        assert_eq!(streams.video.unwrap().codec, "vp9");
+        assert_eq!(streams.audio.unwrap().codec, "ac3");
+
+        for start in [0.0, 0.5] {
+            let stream = ffmpeg.remux(&clip, start).await.unwrap().unwrap();
+            let chunks: Vec<_> = futures_util::StreamExt::collect(stream).await;
+            let mp4: Vec<u8> = chunks.into_iter().flat_map(Result::unwrap).collect();
+            assert_eq!(&mp4[4..8], b"ftyp");
+            assert!(mp4.windows(4).any(|w| w == b"moof"), "fragmented");
+            assert!(mp4.windows(4).any(|w| w == b"mp4a"), "audio became AAC");
+        }
+        let missing = ffmpeg
+            .remux(&clip.with_extension("nope"), 0.0)
+            .await
+            .unwrap();
+        assert!(missing.is_none());
     }
 
     fn image_size(jpeg: &[u8]) -> (usize, usize) {

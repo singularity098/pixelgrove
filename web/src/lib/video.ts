@@ -11,6 +11,11 @@
  */
 export const serverFrames = { available: true };
 
+/** Matroska videos come repackaged as a stream the browser can't seek: see StreamPlayer. */
+export function streamed(name: string): boolean {
+  return /\.mkv$/i.test(name);
+}
+
 const MAX_FRAMES = 3000;
 const CONCURRENT = 2;
 const TIMEOUT_MS = 20000;

@@ -36,7 +36,7 @@ src/                 Rust server
   metadata.rs        EXIF/track metadata (nom-exif), supported extensions
   preview.rs         in-memory preview rendering + LRU cache + concurrency limits
   jxl.rs             JPEG XL: container boxes, header-only size, decoding (jxl-oxide)
-  video.rs           FFmpeg frame extraction and background preload
+  video.rs           FFmpeg frame extraction, background preload, MKV → MP4 remux stream
   location.rs        same-length byte patches that strip GPS from shared originals
   places.rs          offline reverse geocoding (data/cities.tsv)
   auth.rs, shares.rs, trash.rs, server.rs (security headers, routing), alloc.rs
@@ -142,5 +142,8 @@ cd web && npm ci && npm run check && npm run build   # check = svelte-check --fa
 - Back/Forward scroll restoration is manual (`lib/router.svelte.ts`) and keeps scrolling
   for up to 5 s while content loads; real input cancels it, but Playwright's
   programmatic scrolling doesn't, so wait it out in tests.
+- A streamed (non-range) `<video>` source can't be seeked: Chromium reports a zero-length
+  seekable range and clamps every seek to 0, even within what's buffered. MKV playback
+  (`StreamPlayer.svelte`) restarts the stream with `?t=` instead.
 - Shell safety: don't `rm -rf` variables or top-level paths in commands; the session's
   safety check blocks them (and blocks the whole command, including edits in it).

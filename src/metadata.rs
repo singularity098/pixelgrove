@@ -28,7 +28,7 @@ pub fn kind_for_path(path: &Path) -> Option<MediaKind> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     match ext.as_str() {
         "jpg" | "jpeg" | "png" | "webp" | "gif" | "avif" | "jxl" => Some(MediaKind::Image),
-        "mp4" | "m4v" | "webm" | "mov" => Some(MediaKind::Video),
+        "mp4" | "m4v" | "webm" | "mov" | "mkv" => Some(MediaKind::Video),
         _ => None,
     }
 }
@@ -205,8 +205,19 @@ mod tests {
     fn kinds_by_extension() {
         assert_eq!(kind_for_path(Path::new("a/B.JPG")), Some(MediaKind::Image));
         assert_eq!(kind_for_path(Path::new("clip.mov")), Some(MediaKind::Video));
+        assert_eq!(kind_for_path(Path::new("film.MKV")), Some(MediaKind::Video));
         assert_eq!(kind_for_path(Path::new("notes.txt")), None);
         assert_eq!(kind_for_path(Path::new("noext")), None);
+    }
+
+    #[test]
+    fn matroska_track_info() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/clip.mkv");
+        let info = read(&mut MediaParser::new(), &path, MediaKind::Video);
+        assert_eq!((info.width, info.height), (Some(64), Some(48)));
+        assert_eq!(info.duration_ms, Some(1000));
+        // 2024-05-01 10:20:30 UTC.
+        assert_eq!(info.taken_at, Some(1_714_558_830));
     }
 
     #[test]

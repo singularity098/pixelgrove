@@ -26,8 +26,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && cp target/$(xx-cargo --print-target-triple)/release/pixelgrove /pixelgrove \
     && xx-verify --static /pixelgrove
 
-# ---- ffmpeg for video thumbnails: a small static build (cross-compiled like the binary)
-# with just what's needed to read phone and camera video and write one JPEG frame. ----
+# ---- ffmpeg for video thumbnails and Matroska playback: a small static build
+# (cross-compiled like the binary) with just what's needed to read phone, camera and
+# .mkv video, write one JPEG frame, and repackage .mkv as MP4 (audio re-encoded to AAC). ----
 FROM --platform=$BUILDPLATFORM alpine:3.21 AS ffmpeg
 COPY --from=xx / /
 RUN apk add --no-cache clang lld llvm musl-dev make nasm curl xz
@@ -46,13 +47,17 @@ RUN export PATH="$(echo /usr/lib/llvm*/bin):$PATH" \
       --ar=llvm-ar --nm=llvm-nm --ranlib=llvm-ranlib --strip=llvm-strip \
       --extra-ldflags=-static --enable-static --disable-shared \
       --disable-everything --disable-autodetect --disable-doc --disable-debug --disable-network \
-      --disable-ffplay --disable-ffprobe --disable-avdevice --disable-swresample \
+      --disable-ffplay --disable-ffprobe --disable-avdevice \
       --enable-protocol=file,pipe \
       --enable-demuxer=mov,matroska \
       --enable-decoder=h264,hevc,vp8,vp9,mpeg4,mjpeg,prores \
-      --enable-parser=h264,hevc,vp8,vp9,mpeg4video,mjpeg \
-      --enable-encoder=mjpeg --enable-muxer=mjpeg,image2pipe \
+      --enable-decoder=aac,ac3,eac3,dca,truehd,mp3,opus,vorbis,flac,pcm_s16le,pcm_s24le \
+      --enable-parser=h264,hevc,vp8,vp9,av1,mpeg4video,mjpeg \
+      --enable-parser=aac,ac3,dca,mpegaudio,opus,vorbis,flac \
+      --enable-encoder=mjpeg,aac --enable-muxer=mjpeg,image2pipe,mp4 \
+      --enable-bsf=aac_adtstoasc,vp9_superframe \
       --enable-filter=scale,format,transpose,hflip,vflip,null,copy \
+      --enable-filter=aresample,aformat,anull,acopy \
     && make -j"$(nproc)" ffmpeg \
     && llvm-strip ffmpeg \
     && xx-verify --static ffmpeg \

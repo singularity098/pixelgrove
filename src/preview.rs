@@ -107,6 +107,10 @@ impl Previews {
         self.ffmpeg.is_some()
     }
 
+    pub fn ffmpeg(&self) -> Option<&crate::video::Ffmpeg> {
+        self.ffmpeg.as_ref()
+    }
+
     /// A video's thumbnail (one frame, as JPEG), or `None` without ffmpeg.
     pub async fn video(
         self: &Arc<Self>,

@@ -182,6 +182,10 @@ pub struct Versioned {
     pub v: Option<i64>,
     #[serde(default)]
     pub download: bool,
+    /// Matroska videos streamed through ffmpeg: where to start, in seconds (the viewer
+    /// seeks by asking again). With it, a video that can't be streamed is a 404 rather
+    /// than the original file.
+    pub t: Option<f64>,
 }
 
 fn cache_control(versioned: &Versioned, mtime: i64) -> HeaderValue {
@@ -273,6 +277,36 @@ pub(super) async fn file_response(
     versioned: &Versioned,
     request: Request,
 ) -> ApiResult<Response> {
+    if is_matroska(file.name)
+        && !versioned.download
+        && let Some(ffmpeg) = state.previews.ffmpeg()
+    {
+        let start = versioned
+            .t
+            .filter(|t| t.is_finite())
+            .unwrap_or(0.0)
+            .max(0.0);
+        match ffmpeg.remux(file.path, start).await {
+            Ok(Some(stream)) => {
+                let headers = [
+                    (header::CONTENT_TYPE, HeaderValue::from_static("video/mp4")),
+                    (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+                ];
+                return Ok((headers, Body::from_stream(stream)).into_response());
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::debug!(path = %file.path.display(), "remuxing failed: {err:#}");
+            }
+        }
+    }
+    if versioned.t.is_some() && is_matroska(file.name) {
+        // The viewer asked for the stream; it falls back to the original on an error.
+        return Err(ApiError::status(
+            StatusCode::NOT_FOUND,
+            "This video can't be streamed.",
+        ));
+    }
     let mut response = serve_original(state, &file, request).await?;
     let headers = response.headers_mut();
     headers.insert(header::CACHE_CONTROL, cache_control(versioned, file.mtime));
@@ -285,6 +319,12 @@ pub(super) async fn file_response(
         headers.insert(header::CONTENT_DISPOSITION, attachment(file.name));
     }
     Ok(response)
+}
+
+/// Browsers other than Chrome and recent Firefox can't open Matroska, and few play the
+/// AC-3/DTS audio it often carries, so the viewer gets these through `Ffmpeg::remux`.
+fn is_matroska(name: &str) -> bool {
+    name.to_ascii_lowercase().ends_with(".mkv")
 }
 
 impl MediaRow {
@@ -415,6 +455,34 @@ mod tests {
     use super::attachment;
     use crate::api::test_support::TestApp;
     use crate::testdata;
+
+    /// Without ffmpeg (as in tests), the viewer's stream request fails so it falls back
+    /// to the original, which plain requests get.
+    #[tokio::test]
+    async fn matroska_without_ffmpeg() {
+        let app = TestApp::new();
+        let clip = include_bytes!("../../tests/fixtures/clip.mkv");
+        app.write_media("films/clip.mkv", clip);
+        app.scan();
+        let admin = app.setup_admin().await;
+        let id = app.media_id("clip.mkv");
+
+        let detail = app
+            .send("GET", &format!("/api/media/{id}"), None, Some(&admin))
+            .await;
+        assert_eq!(detail.body["kind"], "video");
+        assert_eq!(detail.body["duration_ms"], 1000);
+
+        let stream = app
+            .get_raw(&format!("/api/media/{id}/file?t=0"), &admin, None)
+            .await;
+        assert_eq!(stream.status(), StatusCode::NOT_FOUND);
+        let original = app
+            .get_raw(&format!("/api/media/{id}/file"), &admin, None)
+            .await;
+        assert_eq!(original.status(), StatusCode::OK);
+        assert_eq!(original.headers()["content-length"], clip.len().to_string());
+    }
 
     #[tokio::test]
     async fn detail_preview_and_file() {
